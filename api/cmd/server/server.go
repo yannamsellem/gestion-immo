@@ -62,7 +62,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	}
 	defer pool.Close()
 
-	handler, err := buildHTTPHandler(pool, cfg)
+	handler, err := BuildHTTPHandler(pool, cfg)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,8 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	return serveHTTP(ctx, ":"+port, handler)
 }
 
-func buildHTTPHandler(pool *pgxpool.Pool, cfg config.Config) (http.Handler, error) {
+// BuildHTTPHandler constructs the root HTTP and MCP handler with JWT authentication enforced on all business routes.
+func BuildHTTPHandler(pool *pgxpool.Pool, cfg config.Config) (http.Handler, error) {
 	r2Storage := r2.NewS3Storage(
 		cfg.R2Endpoint,
 		cfg.R2AccessKeyID,
@@ -111,12 +112,15 @@ func buildHTTPHandler(pool *pgxpool.Pool, cfg config.Config) (http.Handler, erro
 		httpx.OK(w, map[string]string{"status": "ok"})
 	})
 	authMod.RegisterHTTPRoutes(mux)
-	portfolioMod.RegisterHTTPRoutes(mux)
-	leaseMod.RegisterHTTPRoutes(mux)
-	paymentMod.RegisterHTTPRoutes(mux)
-	documentMod.RegisterHTTPRoutes(mux)
-	inspectionMod.RegisterHTTPRoutes(mux)
-	accountingMod.RegisterHTTPRoutes(mux)
+
+	protectedMux := http.NewServeMux()
+	portfolioMod.RegisterHTTPRoutes(protectedMux)
+	leaseMod.RegisterHTTPRoutes(protectedMux)
+	paymentMod.RegisterHTTPRoutes(protectedMux)
+	documentMod.RegisterHTTPRoutes(protectedMux)
+	inspectionMod.RegisterHTTPRoutes(protectedMux)
+	accountingMod.RegisterHTTPRoutes(protectedMux)
+	mux.Handle("/api/v1/", authMod.RequireAuthMiddleware()(protectedMux))
 
 	mux.Handle("POST /mcp", mcpRegistry)
 	mux.Handle("GET /mcp", mcpRegistry)

@@ -26,4 +26,5 @@ func (t MCPApiToken) IsActive() bool {
 type MCPTokenRepository interface {
 	SaveMCPToken(ctx context.Context, token MCPApiToken) error
 	FindMCPTokenByHash(ctx context.Context, tokenHash string) (*MCPApiToken, error)
+	RevokeAllUserMCPTokens(ctx context.Context, userID string, revokedAt time.Time) error
 }

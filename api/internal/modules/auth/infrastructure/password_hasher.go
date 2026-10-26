@@ -15,6 +15,9 @@ import (
 	"github.com/yannamsellem/gestion-immo/internal/platform/secret"
 )
 
+// MaxPasswordBytes is the maximum allowed plaintext password length in bytes.
+const MaxPasswordBytes = 128
+
 // PasswordHasher provides Argon2id password hashing and SHA-256 token hashing.
 type PasswordHasher struct {
 	memory      uint32
@@ -22,6 +25,7 @@ type PasswordHasher struct {
 	parallelism uint8
 	saltLength  uint32
 	keyLength   uint32
+	sem         chan struct{}
 }
 
 // NewArgon2Hasher constructs a PasswordHasher configured with Argon2id parameters.
@@ -32,6 +36,7 @@ func NewArgon2Hasher() *PasswordHasher {
 		parallelism: 4,
 		saltLength:  16,
 		keyLength:   32,
+		sem:         make(chan struct{}, 8),
 	}
 }
 
@@ -40,11 +45,17 @@ func (h *PasswordHasher) HashPassword(plain secret.String) (string, error) {
 	if plain.IsEmpty() {
 		return "", errors.New("password_hasher: password must not be empty")
 	}
+	if len(plain.Value()) > MaxPasswordBytes {
+		return "", fmt.Errorf("password_hasher: password exceeds maximum length of %d bytes", MaxPasswordBytes)
+	}
 
 	salt := make([]byte, h.saltLength)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("password_hasher: failed to generate salt: %w", err)
 	}
+
+	h.sem <- struct{}{}
+	defer func() { <-h.sem }()
 
 	hash := argon2.IDKey([]byte(plain.Value()), salt, h.iterations, h.memory, h.parallelism, h.keyLength)
 
@@ -67,6 +78,9 @@ func (h *PasswordHasher) HashPassword(plain secret.String) (string, error) {
 func (h *PasswordHasher) VerifyPassword(plain secret.String, encodedHash string) (bool, error) {
 	if plain.IsEmpty() || strings.TrimSpace(encodedHash) == "" {
 		return false, errors.New("password_hasher: password and hash must not be empty")
+	}
+	if len(plain.Value()) > MaxPasswordBytes {
+		return false, fmt.Errorf("password_hasher: password exceeds maximum length of %d bytes", MaxPasswordBytes)
 	}
 
 	parts := strings.Split(encodedHash, "$")
@@ -97,6 +111,9 @@ func (h *PasswordHasher) VerifyPassword(plain secret.String, encodedHash string)
 	if err != nil {
 		return false, fmt.Errorf("password_hasher: invalid hash encoding: %w", err)
 	}
+
+	h.sem <- struct{}{}
+	defer func() { <-h.sem }()
 
 	computedHash := argon2.IDKey([]byte(plain.Value()), salt, iterations, memory, parallelism, uint32(len(expectedHash)))
 	if subtle.ConstantTimeCompare(computedHash, expectedHash) == 1 {

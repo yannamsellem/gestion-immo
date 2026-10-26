@@ -112,7 +112,10 @@ func bootstrapSuperAdminAction(ctx context.Context, cmd *cli.Command) error {
 	defer cleanup()
 
 	email := strings.TrimSpace(cmd.String("email"))
-	password := strings.TrimSpace(cmd.String("password"))
+	password := cmd.String("password")
+	if strings.TrimSpace(password) == "" {
+		password = ""
+	}
 	userDTO, err := authSvc.BootstrapSuperAdmin(ctx, email, secret.New(password))
 	if err != nil {
 		return err

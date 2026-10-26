@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/yannamsellem/gestion-immo/cmd/server"
 	"github.com/yannamsellem/gestion-immo/cmd/token"
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/config"
 )
 
 func TestCLIApp_ExposesRequiredSubcommandsAndFlags(t *testing.T) {
@@ -98,5 +101,26 @@ func TestTokenKeygenCommand(t *testing.T) {
 	}
 	if authority.KID() != "test-kid" {
 		t.Fatalf("expected KID 'test-kid', got %q", authority.KID())
+	}
+}
+
+func TestServerHTTPHandler_EnforcesJWTAuthOnBusinessRoutes(t *testing.T) {
+	handler, err := server.BuildHTTPHandler(nil, config.Config{})
+	if err != nil {
+		t.Fatalf("BuildHTTPHandler failed: %v", err)
+	}
+
+	reqHealth := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	recHealth := httptest.NewRecorder()
+	handler.ServeHTTP(recHealth, reqHealth)
+	if recHealth.Code != http.StatusOK {
+		t.Fatalf("expected GET /healthz to return 200 OK, got %d", recHealth.Code)
+	}
+
+	reqEntities := httptest.NewRequest(http.MethodGet, "/api/v1/entities", nil)
+	recEntities := httptest.NewRecorder()
+	handler.ServeHTTP(recEntities, reqEntities)
+	if recEntities.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated GET /api/v1/entities to return 401 Unauthorized, got %d: %s", recEntities.Code, recEntities.Body.String())
 	}
 }

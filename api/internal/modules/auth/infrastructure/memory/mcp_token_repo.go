@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
 )
@@ -40,4 +41,19 @@ func (r *MCPTokenRepo) FindMCPTokenByHash(_ context.Context, tokenHash string) (
 	}
 	copyTok := tok
 	return &copyTok, nil
+}
+
+// RevokeAllUserMCPTokens revokes all active MCP API tokens for a user.
+func (r *MCPTokenRepo) RevokeAllUserMCPTokens(_ context.Context, userID string, revokedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ts := revokedAt
+	for hash, tok := range r.mcpByHash {
+		if tok.UserID == userID && tok.RevokedAt == nil {
+			tok.RevokedAt = &ts
+			r.mcpByHash[hash] = tok
+		}
+	}
+	return nil
 }

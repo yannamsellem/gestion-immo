@@ -117,3 +117,19 @@ func TestJwtService_TokenAuthorityVolumeKeysAndKIDValidation(t *testing.T) {
 		t.Fatalf("expected ErrInvalidToken on token with mismatched kid/authority, got %v", err)
 	}
 }
+
+func TestPasswordHasher_EnforcesMaxPasswordBytes(t *testing.T) {
+	hasher := infrastructure.NewArgon2Hasher()
+	validHash, err := hasher.HashPassword(secret.New(strings.Repeat("x", infrastructure.MaxPasswordBytes)))
+	if err != nil {
+		t.Fatalf("expected %d-byte password to succeed, got %v", infrastructure.MaxPasswordBytes, err)
+	}
+
+	tooLong := secret.New(strings.Repeat("x", infrastructure.MaxPasswordBytes+1))
+	if _, err := hasher.HashPassword(tooLong); err == nil {
+		t.Fatal("expected HashPassword to reject password exceeding MaxPasswordBytes")
+	}
+	if ok, err := hasher.VerifyPassword(tooLong, validHash); err == nil || ok {
+		t.Fatalf("expected VerifyPassword to reject password exceeding MaxPasswordBytes, got ok=%v err=%v", ok, err)
+	}
+}

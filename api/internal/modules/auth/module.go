@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -90,4 +91,12 @@ func (m *Module) Authority() *domain.TokenAuthority {
 // RegisterHTTPRoutes registers all auth and SUPER_ADMIN user approval HTTP routes on mux.
 func (m *Module) RegisterHTTPRoutes(mux *http.ServeMux) {
 	m.handler.RegisterRoutes(mux)
+}
+
+// RequireAuthMiddleware returns an HTTP middleware that validates Bearer JWTs and checks active user approval.
+func (m *Module) RequireAuthMiddleware() func(http.Handler) http.Handler {
+	return authhttp.RequireApprovedAuth(m.jwtSvc, func(ctx context.Context, userID string) error {
+		_, err := m.svc.RequireApprovedUser(ctx, userID)
+		return err
+	})
 }

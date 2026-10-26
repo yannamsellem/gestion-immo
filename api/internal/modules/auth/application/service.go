@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -85,6 +86,7 @@ type Service struct {
 	uow         domain.UnitOfWork
 	jwtSvc      *infrastructure.JwtService
 	hasher      *infrastructure.PasswordHasher
+	dummyHash   string
 }
 
 // NewService constructs an auth application Service with constructor-injected per-aggregate repositories and UnitOfWork.
@@ -96,6 +98,10 @@ func NewService(
 	jwtSvc *infrastructure.JwtService,
 	hasher *infrastructure.PasswordHasher,
 ) *Service {
+	var dummyHash string
+	if hasher != nil {
+		dummyHash, _ = hasher.HashPassword(secret.New("dummy-constant-time-password"))
+	}
 	return &Service{
 		userRepo:    userRepo,
 		refreshRepo: refreshRepo,
@@ -103,14 +109,18 @@ func NewService(
 		uow:         uow,
 		jwtSvc:      jwtSvc,
 		hasher:      hasher,
+		dummyHash:   dummyHash,
 	}
 }
 
 // BootstrapSuperAdmin creates or ensures the initial SUPER_ADMIN account in APPROVED status.
 func (s *Service) BootstrapSuperAdmin(ctx context.Context, email string, password secret.String) (UserDTO, error) {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
-	if normalizedEmail == "" || password.IsEmpty() {
+	if normalizedEmail == "" || strings.TrimSpace(password.Value()) == "" {
 		return UserDTO{}, fmt.Errorf("%w: email and password are required", domain.ErrValidation)
+	}
+	if len(password.Value()) < 8 || len(password.Value()) > infrastructure.MaxPasswordBytes {
+		return UserDTO{}, fmt.Errorf("%w: password must be between 8 and %d bytes", domain.ErrValidation, infrastructure.MaxPasswordBytes)
 	}
 
 	passHash, err := s.hasher.HashPassword(password)
@@ -120,7 +130,10 @@ func (s *Service) BootstrapSuperAdmin(ctx context.Context, email string, passwor
 
 	now := time.Now().UTC()
 	existing, err := s.userRepo.FindUserByEmail(ctx, normalizedEmail)
-	if err == nil && existing != nil {
+	if err != nil && !errors.Is(err, domain.ErrUserNotFound) {
+		return UserDTO{}, err
+	}
+	if existing != nil {
 		existing.Role = domain.RoleSuperAdmin
 		existing.Status = domain.StatusApproved
 		existing.PasswordHash = passHash
@@ -158,14 +171,21 @@ func (s *Service) BootstrapSuperAdmin(ctx context.Context, email string, passwor
 func (s *Service) Signup(ctx context.Context, cmd SignupCommand) (UserDTO, error) {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(cmd.Email))
 	fullName := strings.TrimSpace(cmd.FullName)
-	if normalizedEmail == "" || cmd.Password.IsEmpty() {
+	if normalizedEmail == "" || strings.TrimSpace(cmd.Password.Value()) == "" {
 		return UserDTO{}, fmt.Errorf("%w: email and password are required", domain.ErrValidation)
+	}
+	if len(cmd.Password.Value()) < 8 || len(cmd.Password.Value()) > infrastructure.MaxPasswordBytes {
+		return UserDTO{}, fmt.Errorf("%w: password must be between 8 and %d bytes", domain.ErrValidation, infrastructure.MaxPasswordBytes)
 	}
 	if fullName == "" {
 		fullName = normalizedEmail
 	}
 
-	if existing, err := s.userRepo.FindUserByEmail(ctx, normalizedEmail); err == nil && existing != nil {
+	existing, err := s.userRepo.FindUserByEmail(ctx, normalizedEmail)
+	if err != nil && !errors.Is(err, domain.ErrUserNotFound) {
+		return UserDTO{}, err
+	}
+	if existing != nil {
 		return UserDTO{}, domain.ErrEmailAlreadyExists
 	}
 
@@ -239,7 +259,10 @@ func (s *Service) RejectUser(ctx context.Context, actorUserID string, targetUser
 		if err := repos.Users.UpdateUser(txCtx, *target); err != nil {
 			return err
 		}
-		return repos.RefreshTokens.RevokeAllUserRefreshTokens(txCtx, target.ID, now)
+		if err := repos.RefreshTokens.RevokeAllUserRefreshTokens(txCtx, target.ID, now); err != nil {
+			return err
+		}
+		return repos.MCPTokens.RevokeAllUserMCPTokens(txCtx, target.ID, now)
 	}); err != nil {
 		return UserDTO{}, err
 	}
@@ -274,6 +297,7 @@ func (s *Service) Login(ctx context.Context, cmd LoginCommand) (AuthTokensDTO, e
 
 	user, err := s.userRepo.FindUserByEmail(ctx, normalizedEmail)
 	if err != nil {
+		_, _ = s.hasher.VerifyPassword(cmd.Password, s.dummyHash)
 		return AuthTokensDTO{}, domain.ErrInvalidCredentials
 	}
 
@@ -406,6 +430,18 @@ func (s *Service) FindUserByEmail(ctx context.Context, email string) (UserDTO, e
 		return UserDTO{}, err
 	}
 	return toUserDTO(*u), nil
+}
+
+// RequireApprovedUser loads a user by ID and returns domain.ErrAccountNotApproved if the account is not APPROVED.
+func (s *Service) RequireApprovedUser(ctx context.Context, userID string) (*domain.User, error) {
+	user, err := s.userRepo.FindUserByID(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	if !user.IsApproved() {
+		return nil, domain.ErrAccountNotApproved
+	}
+	return user, nil
 }
 
 // ResolveSuperAdminID locates an approved SUPER_ADMIN account by email (or falls back to the first approved SUPER_ADMIN).

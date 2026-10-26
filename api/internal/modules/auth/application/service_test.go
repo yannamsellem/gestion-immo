@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -251,7 +252,112 @@ func TestAuthHTTPAndMCPWorkflow_EndToEnd(t *testing.T) {
 		t.Fatalf("expected 200 OK on reject, got %d", recReject.Code)
 	}
 
-	if _, err := svc.ValidateMCPBearer(ctx, mcpTok.Value()); !errors.Is(err, domain.ErrAccountNotApproved) {
-		t.Fatalf("expected ErrAccountNotApproved for rejected user MCP token, got %v", err)
+	if _, err := svc.ValidateMCPBearer(ctx, mcpTok.Value()); !errors.Is(err, domain.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken for revoked MCP token of rejected user, got %v", err)
+	}
+	storedMCP, err := mcpTokens.FindMCPTokenByHash(ctx, hasher.HashToken(mcpTok))
+	if err != nil || storedMCP.IsActive() {
+		t.Fatalf("expected MCP token to be marked revoked in repository after RejectUser, got active=%v err=%v", storedMCP != nil && storedMCP.IsActive(), err)
+	}
+}
+
+func TestRejectUser_RevokesAllActiveMCPTokensAndBlocksApprovedMiddleware(t *testing.T) {
+	users := memory.NewUserRepo()
+	refreshTokens := memory.NewRefreshTokenRepo()
+	mcpTokens := memory.NewMCPTokenRepo()
+	uow := memory.NewUnitOfWork(users, refreshTokens, mcpTokens)
+	hasher := infrastructure.NewArgon2Hasher()
+	authority, err := domain.GenerateTokenAuthority("kid_reject_mcp_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwtSvc, err := infrastructure.NewJwtService(authority, "gestion-immo", 15*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := application.NewService(users, refreshTokens, mcpTokens, uow, jwtSvc, hasher)
+	ctx := context.Background()
+
+	superAdmin, err := svc.BootstrapSuperAdmin(ctx, "yann@investissimo.fr", secret.New("SuperAdminPass123!"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := svc.Signup(ctx, application.SignupCommand{
+		FullName: "Gestionnaire MCP",
+		Email:    "mcpuser@investissimo.fr",
+		Password: secret.New("ValidPassword123!"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ApproveUser(ctx, superAdmin.ID, user.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	tok1, err := svc.CreateMCPToken(ctx, user.ID, "cli-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok2, err := svc.CreateMCPToken(ctx, user.ID, "cli-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ValidateMCPBearer(ctx, tok1.Value()); err != nil {
+		t.Fatalf("expected tok1 valid before rejection, got %v", err)
+	}
+	if _, err := svc.ValidateMCPBearer(ctx, tok2.Value()); err != nil {
+		t.Fatalf("expected tok2 valid before rejection, got %v", err)
+	}
+
+	if _, err := svc.RejectUser(ctx, superAdmin.ID, user.ID); err != nil {
+		t.Fatalf("RejectUser failed: %v", err)
+	}
+
+	if _, err := svc.ValidateMCPBearer(ctx, tok1.Value()); err == nil {
+		t.Fatal("expected tok1 validation to fail immediately after RejectUser")
+	}
+	if _, err := svc.ValidateMCPBearer(ctx, tok2.Value()); err == nil {
+		t.Fatal("expected tok2 validation to fail immediately after RejectUser")
+	}
+	if _, err := svc.RequireApprovedUser(ctx, user.ID); !errors.Is(err, domain.ErrAccountNotApproved) {
+		t.Fatalf("expected ErrAccountNotApproved from RequireApprovedUser, got %v", err)
+	}
+}
+
+func TestSignup_ValidatesPasswordLengthBounds(t *testing.T) {
+	users := memory.NewUserRepo()
+	refreshTokens := memory.NewRefreshTokenRepo()
+	mcpTokens := memory.NewMCPTokenRepo()
+	uow := memory.NewUnitOfWork(users, refreshTokens, mcpTokens)
+	hasher := infrastructure.NewArgon2Hasher()
+	authority, err := domain.GenerateTokenAuthority("kid_pw_bounds_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwtSvc, err := infrastructure.NewJwtService(authority, "gestion-immo", 15*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := application.NewService(users, refreshTokens, mcpTokens, uow, jwtSvc, hasher)
+	ctx := context.Background()
+
+	// Shorter than 8 bytes -> ErrValidation
+	_, err = svc.Signup(ctx, application.SignupCommand{
+		FullName: "Too Short",
+		Email:    "short@investissimo.fr",
+		Password: secret.New("1234567"),
+	})
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation for 7-byte password, got %v", err)
+	}
+
+	// Longer than 128 bytes -> ErrValidation
+	_, err = svc.Signup(ctx, application.SignupCommand{
+		FullName: "Too Long",
+		Email:    "long@investissimo.fr",
+		Password: secret.New(strings.Repeat("a", 129)),
+	})
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation for 129-byte password, got %v", err)
 	}
 }

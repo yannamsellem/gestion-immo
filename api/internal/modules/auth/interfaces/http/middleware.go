@@ -30,6 +30,32 @@ func RequireAuth(jwtSvc *infrastructure.JwtService) func(http.Handler) http.Hand
 	}
 }
 
+// RequireApprovedAuth returns an HTTP middleware that validates the Bearer JWT token via JwtService
+// and verifies active user approval when checkApproved is non-nil.
+func RequireApprovedAuth(jwtSvc *infrastructure.JwtService, checkApproved func(ctx context.Context, userID string) error) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return RequireApprovedAuthFunc(jwtSvc, checkApproved, next.ServeHTTP)
+	}
+}
+
+// RequireApprovedAuthFunc wraps an http.HandlerFunc with Bearer JWT validation and optional user approval verification.
+func RequireApprovedAuthFunc(jwtSvc *infrastructure.JwtService, checkApproved func(ctx context.Context, userID string) error, next http.HandlerFunc) http.HandlerFunc {
+	return RequireAuthFunc(jwtSvc, func(w http.ResponseWriter, r *http.Request) {
+		if checkApproved != nil {
+			claims, ok := ClaimsFromContext(r.Context())
+			if !ok {
+				httpx.Unauthorized(w, "authentication required")
+				return
+			}
+			if err := checkApproved(r.Context(), claims.UserID); err != nil {
+				httpx.Forbidden(w, err.Error())
+				return
+			}
+		}
+		next(w, r)
+	})
+}
+
 // RequireAuthFunc wraps an http.HandlerFunc with Bearer JWT validation.
 func RequireAuthFunc(jwtSvc *infrastructure.JwtService, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

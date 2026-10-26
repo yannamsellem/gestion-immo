@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -66,4 +67,18 @@ func (r *MCPTokenRepo) FindMCPTokenByHash(ctx context.Context, tokenHash string)
 		return nil, fmt.Errorf("mcp_token_postgres_repo: find mcp token: %w", err)
 	}
 	return &tok, nil
+}
+
+// RevokeAllUserMCPTokens revokes all active MCP API tokens belonging to userID.
+func (r *MCPTokenRepo) RevokeAllUserMCPTokens(ctx context.Context, userID string, revokedAt time.Time) error {
+	const query = `
+		UPDATE mcp_api_tokens
+		SET revoked_at = $2
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`
+	_, err := platformpg.Conn(ctx, r.db).Exec(ctx, query, userID, revokedAt)
+	if err != nil {
+		return fmt.Errorf("mcp_token_postgres_repo: revoke all user mcp tokens: %w", err)
+	}
+	return nil
 }
