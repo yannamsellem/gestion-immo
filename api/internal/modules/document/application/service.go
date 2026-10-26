@@ -4,8 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -19,6 +17,7 @@ import (
 	leasedomain "github.com/yannamsellem/gestion-immo/internal/modules/lease/domain"
 	paymentapp "github.com/yannamsellem/gestion-immo/internal/modules/payment/application"
 	portfolioapp "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/application"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
@@ -188,7 +187,7 @@ func (s *Service) RegisterTemplate(ctx context.Context, cmd RegisterTemplateCmd)
 		return DocumentTemplateDTO{}, fmt.Errorf("%w: unsupported format %q", domain.ErrValidation, cmd.Format)
 	}
 
-	id, err := generateID("tpl")
+	tplID, err := id.Generate("tpl")
 	if err != nil {
 		return DocumentTemplateDTO{}, err
 	}
@@ -213,7 +212,7 @@ func (s *Service) RegisterTemplate(ctx context.Context, cmd RegisterTemplateCmd)
 				return DocumentTemplateDTO{}, fmt.Errorf("document: build minimal docx: %w", err)
 			}
 		}
-		r2Key = fmt.Sprintf("templates/%s.docx", id)
+		r2Key = fmt.Sprintf("templates/%s.docx", tplID)
 		if err := s.storage.Upload(ctx, r2Key, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", bytes.NewReader(docxPayload)); err != nil {
 			return DocumentTemplateDTO{}, err
 		}
@@ -223,7 +222,7 @@ func (s *Service) RegisterTemplate(ctx context.Context, cmd RegisterTemplateCmd)
 
 	now := time.Now().UTC()
 	tpl := domain.DocumentTemplate{
-		ID:           id,
+		ID:           tplID,
 		Name:         name,
 		TemplateType: tplType,
 		Format:       format,
@@ -263,7 +262,7 @@ func (s *Service) AttachFileToR2(ctx context.Context, cmd AttachFileCmd) (Stored
 		return StoredFileDTO{}, fmt.Errorf("%w: file content must not be empty", domain.ErrValidation)
 	}
 
-	id, err := generateID("fil")
+	fileID, err := id.Generate("fil")
 	if err != nil {
 		return StoredFileDTO{}, err
 	}
@@ -307,7 +306,7 @@ func (s *Service) AttachFileToR2(ctx context.Context, cmd AttachFileCmd) (Stored
 	} else if entityID != "" {
 		scope = "entities/" + entityID
 	}
-	r2Key := fmt.Sprintf("files/%s/%s_%s", scope, id, fileName)
+	r2Key := fmt.Sprintf("files/%s/%s_%s", scope, fileID, fileName)
 
 	if err := s.storage.Upload(ctx, r2Key, contentType, bytes.NewReader(cmd.Content)); err != nil {
 		return StoredFileDTO{}, err
@@ -315,7 +314,7 @@ func (s *Service) AttachFileToR2(ctx context.Context, cmd AttachFileCmd) (Stored
 
 	now := time.Now().UTC()
 	sf := domain.StoredFile{
-		ID:            id,
+		ID:            fileID,
 		LegalEntityID: entityID,
 		LeaseID:       leaseID,
 		Category:      category,
@@ -647,11 +646,11 @@ func (s *Service) AssembleGLIDossier(ctx context.Context, leaseID string, templa
 		return GLIDossierArchiveDTO{}, fmt.Errorf("document: close GLI zip archive: %w", err)
 	}
 
-	dossierID, err := generateID("gli")
+	dossierID, err := id.Generate("gli")
 	if err != nil {
 		return GLIDossierArchiveDTO{}, err
 	}
-	archiveFileID, err := generateID("fil")
+	archiveFileID, err := id.Generate("fil")
 	if err != nil {
 		return GLIDossierArchiveDTO{}, err
 	}
@@ -977,13 +976,5 @@ func toStoredFileDTO(sf domain.StoredFile, downloadURL string) StoredFileDTO {
 		DownloadURL:   downloadURL,
 		CreatedAt:     sf.CreatedAt,
 	}
-}
-
-func generateID(prefix string) (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("document: failed to generate random id: %w", err)
-	}
-	return prefix + "_" + hex.EncodeToString(buf), nil
 }
 

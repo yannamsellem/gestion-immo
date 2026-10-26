@@ -3,14 +3,13 @@ package application
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"html"
 	"strings"
 	"time"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/inspection/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
@@ -192,14 +191,14 @@ func (s *Service) CreateTemplate(ctx context.Context, cmd CreateInspectionTempla
 		elements = append([]string(nil), domain.DefaultRoomElements...)
 	}
 
-	id, err := generateID("itpl")
+	tplID, err := id.Generate("itpl")
 	if err != nil {
 		return InspectionTemplateDTO{}, err
 	}
 
 	now := time.Now().UTC()
 	tpl := domain.InspectionTemplate{
-		ID:              id,
+		ID:              tplID,
 		Name:            name,
 		Rooms:           rooms,
 		DefaultElements: elements,
@@ -288,14 +287,14 @@ func (s *Service) CreateInspection(ctx context.Context, cmd CreateInspectionCmd)
 		return InspectionDTO{}, fmt.Errorf("%w: invalid inspection_date %q: %v", domain.ErrValidation, cmd.InspectionDate, err)
 	}
 
-	id, err := generateID("edl")
+	inspID, err := id.Generate("edl")
 	if err != nil {
 		return InspectionDTO{}, err
 	}
 
 	now := time.Now().UTC()
 	insp := domain.Inspection{
-		ID:                id,
+		ID:                inspID,
 		LeaseID:           leaseID,
 		TemplateID:        templateID,
 		Type:              inspType,
@@ -381,7 +380,7 @@ func (s *Service) UpsertInspectionItems(ctx context.Context, inspectionID string
 			itemID = prev.ID
 			createdAt = prev.CreatedAt
 		} else {
-			itemID, err = generateID("edli")
+			itemID, err = id.Generate("edli")
 			if err != nil {
 				return InspectionDTO{}, err
 			}
@@ -540,14 +539,14 @@ func (s *Service) CreateIncident(ctx context.Context, cmd CreateIncidentCmd) (In
 		return IncidentDTO{}, fmt.Errorf("%w: invalid occurred_at %q: %v", domain.ErrValidation, cmd.OccurredAt, err)
 	}
 
-	id, err := generateID("inc")
+	incID, err := id.Generate("inc")
 	if err != nil {
 		return IncidentDTO{}, err
 	}
 
 	now := time.Now().UTC()
 	inc := domain.Incident{
-		ID:                   id,
+		ID:                   incID,
 		PropertyID:           strings.TrimSpace(cmd.PropertyID),
 		LotID:                strings.TrimSpace(cmd.LotID),
 		LeaseID:              strings.TrimSpace(cmd.LeaseID),
@@ -838,13 +837,5 @@ func parseDateOrToday(raw string) (time.Time, error) {
 		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC), nil
 	}
 	return time.Parse("2006-01-02", trimmed)
-}
-
-func generateID(prefix string) (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("inspection: failed to generate random id: %w", err)
-	}
-	return prefix + "_" + hex.EncodeToString(buf), nil
 }
 

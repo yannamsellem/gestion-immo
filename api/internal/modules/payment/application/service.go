@@ -2,8 +2,6 @@ package application
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"sort"
@@ -13,6 +11,7 @@ import (
 	leaseapp "github.com/yannamsellem/gestion-immo/internal/modules/lease/application"
 	leasedomain "github.com/yannamsellem/gestion-immo/internal/modules/lease/domain"
 	"github.com/yannamsellem/gestion-immo/internal/modules/payment/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 )
 
@@ -163,7 +162,7 @@ func (s *Service) RecordCashPayment(ctx context.Context, cmd RecordCashPaymentCm
 
 	receiptNum := strings.TrimSpace(cmd.ReceiptNumber)
 	if receiptNum == "" {
-		suffix, err := generateID("rcu")
+		suffix, err := id.Generate("rcu")
 		if err != nil {
 			return PaymentReceiptDTO{}, err
 		}
@@ -192,7 +191,7 @@ func (s *Service) RecordCashPayment(ctx context.Context, cmd RecordCashPaymentCm
 			return err
 		}
 
-		cashEntryID, err := generateID("cje")
+		cashEntryID, err := id.Generate("cje")
 		if err != nil {
 			return err
 		}
@@ -300,7 +299,7 @@ func (s *Service) RecordCashDepositToBank(ctx context.Context, cmd RecordCashDep
 		return CashJournalEntryDTO{}, err
 	}
 
-	id, err := generateID("cje")
+	entryID, err := id.Generate("cje")
 	if err != nil {
 		return CashJournalEntryDTO{}, err
 	}
@@ -311,7 +310,7 @@ func (s *Service) RecordCashDepositToBank(ctx context.Context, cmd RecordCashDep
 	}
 
 	entry := domain.CashJournalEntry{
-		ID:                     id,
+		ID:                     entryID,
 		LegalEntityID:          entityID,
 		AccountCode:            "530",
 		CounterpartAccountCode: "580",
@@ -629,7 +628,7 @@ func (s *Service) allocateAndPersistPayment(
 		}
 	}
 
-	paymentID, err := generateID("pay")
+	paymentID, err := id.Generate("pay")
 	if err != nil {
 		return PaymentReceiptDTO{}, err
 	}
@@ -637,7 +636,7 @@ func (s *Service) allocateAndPersistPayment(
 	now := time.Now().UTC()
 	var totalApplied money.AmountCents
 	for i := range allocs {
-		allocID, err := generateID("alc")
+		allocID, err := id.Generate("alc")
 		if err != nil {
 			return PaymentReceiptDTO{}, err
 		}
@@ -730,13 +729,5 @@ func parsePaymentDateOrNow(raw string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("%w: invalid payment_date %q (expected YYYY-MM-DD)", domain.ErrValidation, raw)
-}
-
-func generateID(prefix string) (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("payment: failed to generate random id: %w", err)
-	}
-	return prefix + "_" + hex.EncodeToString(buf), nil
 }
 

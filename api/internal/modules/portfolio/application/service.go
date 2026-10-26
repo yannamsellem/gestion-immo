@@ -2,13 +2,12 @@ package application
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 )
 
@@ -171,14 +170,14 @@ func (s *Service) CreateLegalEntity(ctx context.Context, cmd CreateLegalEntityCm
 		totalShares = 100
 	}
 
-	id, err := generateID("ent")
+	entityID, err := id.Generate("ent")
 	if err != nil {
 		return LegalEntityDTO{}, err
 	}
 
 	now := time.Now().UTC()
 	entity := domain.LegalEntity{
-		ID:                id,
+		ID:                entityID,
 		Name:              name,
 		EntityType:        entityType,
 		SIRET:             strings.TrimSpace(cmd.SIRET),
@@ -246,14 +245,14 @@ func (s *Service) UpsertShareholder(ctx context.Context, cmd UpsertShareholderCm
 
 	detentionBps := domain.ComputeDetentionBasisPoints(cmd.SharesCount, entity.TotalShares)
 
-	id, err := generateID("sh")
+	shID, err := id.Generate("sh")
 	if err != nil {
 		return ShareholderDTO{}, err
 	}
 
 	now := time.Now().UTC()
 	sh := domain.Shareholder{
-		ID:                    id,
+		ID:                    shID,
 		LegalEntityID:         entity.ID,
 		FullName:              fullName,
 		SharesCount:           cmd.SharesCount,
@@ -325,14 +324,14 @@ func (s *Service) CreateProperty(ctx context.Context, cmd CreatePropertyCmd) (Pr
 		return PropertyDTO{}, fmt.Errorf("%w: acquisition_cents and work_stock_cents cannot be negative", domain.ErrValidation)
 	}
 
-	id, err := generateID("prop")
+	propID, err := id.Generate("prop")
 	if err != nil {
 		return PropertyDTO{}, err
 	}
 
 	now := time.Now().UTC()
 	prop := domain.Property{
-		ID:                 id,
+		ID:                 propID,
 		LegalEntityID:      entity.ID,
 		Label:              label,
 		PropertyType:       propType,
@@ -407,14 +406,14 @@ func (s *Service) CreateLot(ctx context.Context, cmd CreateLotCmd) (LotDTO, erro
 		lotType = "APARTMENT"
 	}
 
-	id, err := generateID("lot")
+	lotID, err := id.Generate("lot")
 	if err != nil {
 		return LotDTO{}, err
 	}
 
 	now := time.Now().UTC()
 	lot := domain.Lot{
-		ID:             id,
+		ID:             lotID,
 		PropertyID:     prop.ID,
 		Label:          label,
 		LotType:        lotType,
@@ -573,14 +572,6 @@ func toLotDTO(l domain.Lot) LotDTO {
 		CreatedAt:      l.CreatedAt,
 		UpdatedAt:      l.UpdatedAt,
 	}
-}
-
-func generateID(prefix string) (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("portfolio: failed to generate random id: %w", err)
-	}
-	return prefix + "_" + hex.EncodeToString(buf), nil
 }
 
 

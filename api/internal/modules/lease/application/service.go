@@ -2,14 +2,13 @@ package application
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/lease/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 )
 
@@ -122,14 +121,14 @@ func (s *Service) CreateTenant(ctx context.Context, cmd CreateTenantCmd) (Tenant
 		return TenantDTO{}, fmt.Errorf("%w: full_name is required", domain.ErrValidation)
 	}
 
-	id, err := generateID("ten")
+	tenantID, err := id.Generate("ten")
 	if err != nil {
 		return TenantDTO{}, err
 	}
 
 	now := time.Now().UTC()
 	tenant := domain.Tenant{
-		ID:        id,
+		ID:        tenantID,
 		FullName:  fullName,
 		Email:     strings.TrimSpace(cmd.Email),
 		Phone:     strings.TrimSpace(cmd.Phone),
@@ -243,13 +242,13 @@ func (s *Service) CreateLease(ctx context.Context, cmd CreateLeaseCmd) (LeaseDTO
 		endDate = &endUTC
 	}
 
-	id, err := generateID("lse")
+	leaseID, err := id.Generate("lse")
 	if err != nil {
 		return LeaseDTO{}, err
 	}
 
 	lease := domain.Lease{
-		ID:                   id,
+		ID:                   leaseID,
 		LegalEntityID:        entityID,
 		LotID:                lotID,
 		TenantID:             tenantID,
@@ -369,7 +368,7 @@ func (s *Service) GenerateMonthlyRentCalls(ctx context.Context, entityID string,
 				return err
 			}
 
-			id, err := generateID("rc")
+			rcID, err := id.Generate("rc")
 			if err != nil {
 				return err
 			}
@@ -378,7 +377,7 @@ func (s *Service) GenerateMonthlyRentCalls(ctx context.Context, entityID string,
 			dueDate := computeDueDate(periodTime.Year(), periodTime.Month(), lease.DueDayOfMonth)
 
 			rc := domain.RentCall{
-				ID:                id,
+				ID:                rcID,
 				LeaseID:           lease.ID,
 				LegalEntityID:     lease.LegalEntityID,
 				TenantID:          lease.TenantID,
@@ -525,14 +524,6 @@ func toRentCallDTO(rc domain.RentCall) RentCallDTO {
 		CreatedAt:         rc.CreatedAt,
 		UpdatedAt:         rc.UpdatedAt,
 	}
-}
-
-func generateID(prefix string) (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("lease: failed to generate random id: %w", err)
-	}
-	return prefix + "_" + hex.EncodeToString(buf), nil
 }
 
 

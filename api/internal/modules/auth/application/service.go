@@ -2,8 +2,6 @@ package application
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,7 +9,7 @@ import (
 	"time"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
-	"github.com/yannamsellem/gestion-immo/internal/modules/auth/infrastructure"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/secret"
 )
 
@@ -84,8 +82,8 @@ type Service struct {
 	refreshRepo domain.RefreshTokenRepository
 	mcpRepo     domain.MCPTokenRepository
 	uow         domain.UnitOfWork
-	jwtSvc      *infrastructure.JwtService
-	hasher      *infrastructure.PasswordHasher
+	jwtSvc      domain.AccessTokenManager
+	hasher      domain.SecretHasher
 	dummyHash   string
 }
 
@@ -95,8 +93,8 @@ func NewService(
 	refreshRepo domain.RefreshTokenRepository,
 	mcpRepo domain.MCPTokenRepository,
 	uow domain.UnitOfWork,
-	jwtSvc *infrastructure.JwtService,
-	hasher *infrastructure.PasswordHasher,
+	jwtSvc domain.AccessTokenManager,
+	hasher domain.SecretHasher,
 ) *Service {
 	var dummyHash string
 	if hasher != nil {
@@ -119,8 +117,8 @@ func (s *Service) BootstrapSuperAdmin(ctx context.Context, email string, passwor
 	if normalizedEmail == "" || strings.TrimSpace(password.Value()) == "" {
 		return UserDTO{}, fmt.Errorf("%w: email and password are required", domain.ErrValidation)
 	}
-	if len(password.Value()) < 8 || len(password.Value()) > infrastructure.MaxPasswordBytes {
-		return UserDTO{}, fmt.Errorf("%w: password must be between 8 and %d bytes", domain.ErrValidation, infrastructure.MaxPasswordBytes)
+	if len(password.Value()) < 8 || len(password.Value()) > domain.MaxPasswordBytes {
+		return UserDTO{}, fmt.Errorf("%w: password must be between 8 and %d bytes", domain.ErrValidation, domain.MaxPasswordBytes)
 	}
 
 	passHash, err := s.hasher.HashPassword(password)
@@ -145,12 +143,12 @@ func (s *Service) BootstrapSuperAdmin(ctx context.Context, email string, passwor
 		return toUserDTO(*existing), nil
 	}
 
-	id, err := generateID("usr")
+	userID, err := id.Generate("usr")
 	if err != nil {
 		return UserDTO{}, err
 	}
 	user := domain.User{
-		ID:           id,
+		ID:           userID,
 		FullName:     "Super Administrateur",
 		Email:        normalizedEmail,
 		PasswordHash: passHash,
@@ -174,8 +172,8 @@ func (s *Service) Signup(ctx context.Context, cmd SignupCommand) (UserDTO, error
 	if normalizedEmail == "" || strings.TrimSpace(cmd.Password.Value()) == "" {
 		return UserDTO{}, fmt.Errorf("%w: email and password are required", domain.ErrValidation)
 	}
-	if len(cmd.Password.Value()) < 8 || len(cmd.Password.Value()) > infrastructure.MaxPasswordBytes {
-		return UserDTO{}, fmt.Errorf("%w: password must be between 8 and %d bytes", domain.ErrValidation, infrastructure.MaxPasswordBytes)
+	if len(cmd.Password.Value()) < 8 || len(cmd.Password.Value()) > domain.MaxPasswordBytes {
+		return UserDTO{}, fmt.Errorf("%w: password must be between 8 and %d bytes", domain.ErrValidation, domain.MaxPasswordBytes)
 	}
 	if fullName == "" {
 		fullName = normalizedEmail
@@ -194,13 +192,13 @@ func (s *Service) Signup(ctx context.Context, cmd SignupCommand) (UserDTO, error
 		return UserDTO{}, err
 	}
 
-	id, err := generateID("usr")
+	userID, err := id.Generate("usr")
 	if err != nil {
 		return UserDTO{}, err
 	}
 	now := time.Now().UTC()
 	user := domain.User{
-		ID:           id,
+		ID:           userID,
 		FullName:     fullName,
 		Email:        normalizedEmail,
 		PasswordHash: passHash,
@@ -373,14 +371,14 @@ func (s *Service) CreateMCPToken(ctx context.Context, userID string, label strin
 		trimmedLabel = "antigravity-mcp"
 	}
 
-	rawTokenStr, err := generateID("mcp_live")
+	rawTokenStr, err := id.Generate("mcp_live")
 	if err != nil {
 		return secret.String{}, err
 	}
 	rawSecret := secret.New(rawTokenStr)
 	tokenHash := s.hasher.HashToken(rawSecret)
 
-	tokID, err := generateID("mcptok")
+	tokID, err := id.Generate("mcptok")
 	if err != nil {
 		return secret.String{}, err
 	}
@@ -482,7 +480,7 @@ func (s *Service) issueInitialTokens(ctx context.Context, user domain.User) (Aut
 		return AuthTokensDTO{}, err
 	}
 
-	familyID, err := generateID("rtfam")
+	familyID, err := id.Generate("rtfam")
 	if err != nil {
 		return AuthTokensDTO{}, err
 	}
@@ -535,14 +533,14 @@ func (s *Service) ValidateMCPBearer(ctx context.Context, rawBearer string) (stri
 }
 
 func (s *Service) buildRefreshTokenRecord(userID string, familyID string, now time.Time) (secret.String, domain.RefreshTokenRecord, error) {
-	rawRefreshStr, err := generateID("rt_live")
+	rawRefreshStr, err := id.Generate("rt_live")
 	if err != nil {
 		return secret.String{}, domain.RefreshTokenRecord{}, err
 	}
 	rawRefresh := secret.New(rawRefreshStr)
 	refreshHash := s.hasher.HashToken(rawRefresh)
 
-	recID, err := generateID("rt")
+	recID, err := id.Generate("rt")
 	if err != nil {
 		return secret.String{}, domain.RefreshTokenRecord{}, err
 	}
@@ -568,13 +566,5 @@ func toUserDTO(u domain.User) UserDTO {
 		ApprovedAt: u.ApprovedAt,
 		CreatedAt:  u.CreatedAt,
 	}
-}
-
-func generateID(prefix string) (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("auth: failed to generate random id: %w", err)
-	}
-	return prefix + "_" + hex.EncodeToString(buf), nil
 }
 

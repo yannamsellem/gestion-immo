@@ -3,8 +3,6 @@ package application
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +10,7 @@ import (
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/infrastructure"
 	portfolioapp "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/application"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
@@ -210,7 +209,7 @@ func (s *Service) RecordJournalEntry(ctx context.Context, cmd RecordJournalEntry
 		journalLabel = defaultJournalLabel(journalCode)
 	}
 
-	entryID, err := generateID("je")
+	entryID, err := id.Generate("je")
 	if err != nil {
 		return JournalEntryDTO{}, err
 	}
@@ -230,7 +229,7 @@ func (s *Service) RecordJournalEntry(ctx context.Context, cmd RecordJournalEntry
 		if acctCode == "" {
 			return JournalEntryDTO{}, fmt.Errorf("%w: account_code is required on line %d", domain.ErrValidation, i+1)
 		}
-		lineID, lErr := generateID("jl")
+		lineID, lErr := id.Generate("jl")
 		if lErr != nil {
 			return JournalEntryDTO{}, lErr
 		}
@@ -408,7 +407,7 @@ func (s *Service) GenerateAnnualAccountsPDF(
 		return StoredFileDTO{}, fmt.Errorf("accounting: render annual accounts pdf: %w", err)
 	}
 
-	reportID, err := generateID("aar")
+	reportID, err := id.Generate("aar")
 	if err != nil {
 		return StoredFileDTO{}, err
 	}
@@ -795,13 +794,5 @@ func sanitizeSegment(s string) string {
 		return "entity"
 	}
 	return res
-}
-
-func generateID(prefix string) (string, error) {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("accounting: generate id: %w", err)
-	}
-	return fmt.Sprintf("%s_%s", prefix, hex.EncodeToString(b[:])), nil
 }
 
