@@ -168,6 +168,23 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
+	itemsPayload, _ := json.Marshal([]application.InspectionItemInput{
+		{RoomName: "Chambre 1", ElementName: "Fenêtre", Condition: "GOOD", Observation: "Double vitrage OK"},
+	})
+	reqUpsertItems := httptest.NewRequest(http.MethodPut, "/api/v1/inspections/"+exitInsp.ID+"/items", bytes.NewReader(itemsPayload))
+	recUpsertItems := httptest.NewRecorder()
+	mux.ServeHTTP(recUpsertItems, reqUpsertItems)
+	if recUpsertItems.Code != http.StatusOK {
+		t.Fatalf("expected 200 from PUT /api/v1/inspections/{id}/items, got %d: %s", recUpsertItems.Code, recUpsertItems.Body.String())
+	}
+
+	reqGenPDF := httptest.NewRequest(http.MethodPost, "/api/v1/inspections/"+exitInsp.ID+"/pdf", nil)
+	recGenPDF := httptest.NewRecorder()
+	mux.ServeHTTP(recGenPDF, reqGenPDF)
+	if recGenPDF.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from POST /api/v1/inspections/{id}/pdf, got %d: %s", recGenPDF.Code, recGenPDF.Body.String())
+	}
+
 	incPayload, _ := json.Marshal(application.CreateIncidentCmd{
 		PropertyID:         "prop_1",
 		LotID:              "lot_1",

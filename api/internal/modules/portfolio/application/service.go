@@ -368,12 +368,14 @@ func (s *Service) ListProperties(ctx context.Context, entityID string) ([]Proper
 		return nil, err
 	}
 
+	lotsByProp, err := s.listLotsByProperties(ctx, props)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]PropertyDTO, 0, len(props))
 	for _, p := range props {
-		lots, err := s.lotRepo.ListLotsByProperty(ctx, p.ID)
-		if err != nil {
-			return nil, err
-		}
+		lots := lotsByProp[p.ID]
 		lotDTOs := make([]LotDTO, 0, len(lots))
 		for _, l := range lots {
 			lotDTOs = append(lotDTOs, toLotDTO(l))
@@ -456,6 +458,11 @@ func (s *Service) GetEntityPortfolioSummary(ctx context.Context, entityID string
 		return EntityPortfolioSummaryDTO{}, err
 	}
 
+	lotsByProp, err := s.listLotsByProperties(ctx, props)
+	if err != nil {
+		return EntityPortfolioSummaryDTO{}, err
+	}
+
 	var totalAcquisition money.AmountCents
 	var totalWorkStock money.AmountCents
 	var totalBookValue money.AmountCents
@@ -463,10 +470,7 @@ func (s *Service) GetEntityPortfolioSummary(ctx context.Context, entityID string
 
 	propDTOs := make([]PropertyDTO, 0, len(props))
 	for _, p := range props {
-		lots, err := s.lotRepo.ListLotsByProperty(ctx, p.ID)
-		if err != nil {
-			return EntityPortfolioSummaryDTO{}, err
-		}
+		lots := lotsByProp[p.ID]
 		lotDTOs := make([]LotDTO, 0, len(lots))
 		for _, l := range lots {
 			lotDTOs = append(lotDTOs, toLotDTO(l))
@@ -487,6 +491,28 @@ func (s *Service) GetEntityPortfolioSummary(ctx context.Context, entityID string
 		TotalBookValueCents:   totalBookValue,
 		TotalLotsCount:        totalLotsCount,
 	}, nil
+}
+
+func (s *Service) listLotsByProperties(ctx context.Context, props []domain.Property) (map[string][]domain.Lot, error) {
+	if len(props) == 0 {
+		return map[string][]domain.Lot{}, nil
+	}
+	propertyIDs := make([]string, len(props))
+	for i := range props {
+		propertyIDs[i] = props[i].ID
+	}
+	if batchRepo, ok := s.lotRepo.(domain.LotBatchRepository); ok {
+		return batchRepo.ListLotsByPropertyIDs(ctx, propertyIDs)
+	}
+	grouped := make(map[string][]domain.Lot, len(props))
+	for _, propID := range propertyIDs {
+		lots, err := s.lotRepo.ListLotsByProperty(ctx, propID)
+		if err != nil {
+			return nil, err
+		}
+		grouped[propID] = lots
+	}
+	return grouped, nil
 }
 
 func toLegalEntityDTO(e domain.LegalEntity) LegalEntityDTO {

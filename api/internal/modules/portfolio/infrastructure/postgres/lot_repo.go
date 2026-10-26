@@ -44,19 +44,32 @@ func (r *LotRepo) CreateLot(ctx context.Context, lot domain.Lot) error {
 
 // ListLotsByProperty lists all lots belonging to a property.
 func (r *LotRepo) ListLotsByProperty(ctx context.Context, propertyID string) ([]domain.Lot, error) {
+	grouped, err := r.ListLotsByPropertyIDs(ctx, []string{propertyID})
+	if err != nil {
+		return nil, err
+	}
+	return grouped[propertyID], nil
+}
+
+// ListLotsByPropertyIDs lists all lots belonging to any of propertyIDs grouped by property_id.
+func (r *LotRepo) ListLotsByPropertyIDs(ctx context.Context, propertyIDs []string) (map[string][]domain.Lot, error) {
+	grouped := make(map[string][]domain.Lot, len(propertyIDs))
+	if len(propertyIDs) == 0 {
+		return grouped, nil
+	}
+
 	const query = `
 		SELECT id, property_id, label, lot_type, surface_m2, ownership_share, floor, created_at, updated_at
 		FROM lots
-		WHERE property_id = $1
+		WHERE property_id = ANY($1)
 		ORDER BY created_at ASC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, propertyID)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, propertyIDs)
 	if err != nil {
 		return nil, fmt.Errorf("portfolio/postgres/lot_repo: list lots: %w", err)
 	}
 	defer rows.Close()
 
-	var lots []domain.Lot
 	for rows.Next() {
 		var l domain.Lot
 		if err := rows.Scan(
@@ -72,10 +85,10 @@ func (r *LotRepo) ListLotsByProperty(ctx context.Context, propertyID string) ([]
 		); err != nil {
 			return nil, fmt.Errorf("portfolio/postgres/lot_repo: scan lot: %w", err)
 		}
-		lots = append(lots, l)
+		grouped[l.PropertyID] = append(grouped[l.PropertyID], l)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("portfolio/postgres/lot_repo: iterate lots: %w", err)
 	}
-	return lots, nil
+	return grouped, nil
 }

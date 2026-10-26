@@ -134,13 +134,23 @@ func (r *InspectionRepo) ListInspectionsByLease(ctx context.Context, leaseID str
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close()
 
+	if len(out) == 0 {
+		return out, nil
+	}
+
+	inspectionIDs := make([]string, len(out))
 	for i := range out {
-		items, err := r.loadInspectionItems(ctx, out[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		out[i].Items = items
+		inspectionIDs[i] = out[i].ID
+	}
+
+	itemsByInspection, err := r.loadInspectionItemsByInspectionIDs(ctx, inspectionIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Items = itemsByInspection[out[i].ID]
 	}
 	return out, nil
 }
@@ -162,23 +172,35 @@ func (r *InspectionRepo) UpsertInspectionItems(ctx context.Context, inspectionID
 				photo_r2_keys = EXCLUDED.photo_r2_keys,
 				updated_at = EXCLUDED.updated_at
 		`
-		for _, item := range items {
-			photos := item.PhotoR2Keys
-			if photos == nil {
-				photos = []string{}
+		if len(items) > 0 {
+			batch := &pgx.Batch{}
+			for _, item := range items {
+				photos := item.PhotoR2Keys
+				if photos == nil {
+					photos = []string{}
+				}
+				batch.Queue(query,
+					item.ID,
+					inspectionID,
+					item.RoomName,
+					item.ElementName,
+					string(item.Condition),
+					item.Observation,
+					photos,
+					item.CreatedAt,
+					item.UpdatedAt,
+				)
 			}
-			if _, err := conn.Exec(txCtx, query,
-				item.ID,
-				inspectionID,
-				item.RoomName,
-				item.ElementName,
-				string(item.Condition),
-				item.Observation,
-				photos,
-				item.CreatedAt,
-				item.UpdatedAt,
-			); err != nil {
-				return fmt.Errorf("inspection/postgres/inspection_repo: upsert inspection item (%s/%s): %w", item.RoomName, item.ElementName, err)
+
+			br := conn.SendBatch(txCtx, batch)
+			for _, item := range items {
+				if _, err := br.Exec(); err != nil {
+					_ = br.Close()
+					return fmt.Errorf("inspection/postgres/inspection_repo: upsert inspection item (%s/%s): %w", item.RoomName, item.ElementName, err)
+				}
+			}
+			if err := br.Close(); err != nil {
+				return fmt.Errorf("inspection/postgres/inspection_repo: close batch: %w", err)
 			}
 		}
 
@@ -191,19 +213,27 @@ func (r *InspectionRepo) UpsertInspectionItems(ctx context.Context, inspectionID
 }
 
 func (r *InspectionRepo) loadInspectionItems(ctx context.Context, inspectionID string) ([]domain.InspectionItem, error) {
+	grouped, err := r.loadInspectionItemsByInspectionIDs(ctx, []string{inspectionID})
+	if err != nil {
+		return nil, err
+	}
+	return grouped[inspectionID], nil
+}
+
+func (r *InspectionRepo) loadInspectionItemsByInspectionIDs(ctx context.Context, inspectionIDs []string) (map[string][]domain.InspectionItem, error) {
 	const query = `
 		SELECT id, inspection_id, room_name, element_name, condition, observation, photo_r2_keys, created_at, updated_at
 		FROM inspection_items
-		WHERE inspection_id = $1
-		ORDER BY created_at ASC, id ASC
+		WHERE inspection_id = ANY($1)
+		ORDER BY room_name ASC, element_name ASC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, inspectionID)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, inspectionIDs)
 	if err != nil {
 		return nil, fmt.Errorf("inspection/postgres/inspection_repo: load inspection items: %w", err)
 	}
 	defer rows.Close()
 
-	var items []domain.InspectionItem
+	grouped := make(map[string][]domain.InspectionItem, len(inspectionIDs))
 	for rows.Next() {
 		var item domain.InspectionItem
 		var cond string
@@ -221,7 +251,7 @@ func (r *InspectionRepo) loadInspectionItems(ctx context.Context, inspectionID s
 			return nil, fmt.Errorf("inspection/postgres/inspection_repo: scan inspection item: %w", err)
 		}
 		item.Condition = domain.ConditionState(cond)
-		items = append(items, item)
+		grouped[item.InspectionID] = append(grouped[item.InspectionID], item)
 	}
-	return items, rows.Err()
+	return grouped, rows.Err()
 }

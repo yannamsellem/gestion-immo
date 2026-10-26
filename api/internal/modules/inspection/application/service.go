@@ -404,12 +404,22 @@ func (s *Service) UpsertInspectionItems(ctx context.Context, inspectionID string
 		return InspectionDTO{}, err
 	}
 
-	updated, err := s.inspections.FindInspectionByID(ctx, insp.ID)
-	if err != nil {
-		return InspectionDTO{}, err
+	indexByKey := make(map[string]int, len(insp.Items))
+	for i, existing := range insp.Items {
+		indexByKey[itemCompositeKey(existing.RoomName, existing.ElementName)] = i
 	}
+	for _, item := range domainItems {
+		key := itemCompositeKey(item.RoomName, item.ElementName)
+		if idx, exists := indexByKey[key]; exists {
+			insp.Items[idx] = item
+		} else {
+			indexByKey[key] = len(insp.Items)
+			insp.Items = append(insp.Items, item)
+		}
+	}
+	insp.UpdatedAt = now
 
-	return s.toInspectionDTO(ctx, *updated), nil
+	return s.toInspectionDTO(ctx, *insp), nil
 }
 
 // GenerateInspectionReport renders a PDF report for the inspection, uploads it to Cloudflare R2,

@@ -235,6 +235,30 @@ func TestAssembleGLIDossier_PopulatesDocxRendersLedgerAndBundlesR2Attachments(t 
 	mux := http.NewServeMux()
 	docHandler.RegisterRoutes(mux)
 
+	reqListTpl := httptest.NewRequest(http.MethodGet, "/api/v1/document-templates", nil)
+	recListTpl := httptest.NewRecorder()
+	mux.ServeHTTP(recListTpl, reqListTpl)
+	if recListTpl.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 from GET /api/v1/document-templates, got %d: %s", recListTpl.Code, recListTpl.Body.String())
+	}
+	var listedTemplates []application.DocumentTemplateDTO
+	if err := json.Unmarshal(recListTpl.Body.Bytes(), &listedTemplates); err != nil || len(listedTemplates) == 0 {
+		t.Fatalf("expected non-empty template list, got %+v (err=%v)", listedTemplates, err)
+	}
+
+	genBody, _ := json.Marshal(application.GenerateDocCmd{
+		TemplateID:     tpl.ID,
+		LegalEntityID:  entity.ID,
+		LeaseID:        lease.ID,
+		OutputFileName: "declaration_gli_custom.docx",
+	})
+	reqGen := httptest.NewRequest(http.MethodPost, "/api/v1/documents/generate", bytes.NewReader(genBody))
+	recGen := httptest.NewRecorder()
+	mux.ServeHTTP(recGen, reqGen)
+	if recGen.Code != http.StatusCreated {
+		t.Fatalf("expected HTTP 201 from POST /api/v1/documents/generate, got %d: %s", recGen.Code, recGen.Body.String())
+	}
+
 	reqHTTP := httptest.NewRequest(http.MethodPost, "/api/v1/leases/"+lease.ID+"/gli-dossier", nil)
 	recHTTP := httptest.NewRecorder()
 	mux.ServeHTTP(recHTTP, reqHTTP)

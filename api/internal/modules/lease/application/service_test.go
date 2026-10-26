@@ -240,9 +240,53 @@ func TestLeaseModule_HTTPAndMCPIntegration(t *testing.T) {
 		t.Fatalf("expected 2550_00 TTC, got %d", generated[0].TotalDueCents)
 	}
 
-	// 4. Verify MCP tools list includes create_tenant, create_lease, list_leases
+	// 4. Verify MCP tools list and execute create_tenant, create_lease, list_leases
 	tools := reg.Tools()
 	if len(tools) != 3 {
 		t.Fatalf("expected 3 MCP tools registered, got %d", len(tools))
+	}
+
+	callMCPTool := func(id int, name string, args map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      name,
+				"arguments": args,
+			},
+		})
+		r := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(payload))
+		r.Header.Set("Authorization", "Bearer test_token")
+		w := httptest.NewRecorder()
+		reg.ServeHTTP(w, r)
+		return w
+	}
+
+	recMCPTenant := callMCPTool(1, "create_tenant", map[string]any{
+		"full_name": "MCP TENANT SAS",
+		"email":     "mcp@tenant.fr",
+	})
+	if recMCPTenant.Code != http.StatusOK || !bytes.Contains(recMCPTenant.Body.Bytes(), []byte("MCP TENANT SAS")) {
+		t.Fatalf("create_tenant MCP failed (%d): %s", recMCPTenant.Code, recMCPTenant.Body.String())
+	}
+
+	recMCPLease := callMCPTool(2, "create_lease", map[string]any{
+		"legal_entity_id": "ent_99",
+		"lot_id":          "lot_100",
+		"tenant_id":       createdTenant.ID,
+		"lease_type":      "RESIDENTIAL_UNFURNISHED",
+		"rent_net_cents":  950_00,
+	})
+	if recMCPLease.Code != http.StatusOK || !bytes.Contains(recMCPLease.Body.Bytes(), []byte("lot_100")) {
+		t.Fatalf("create_lease MCP failed (%d): %s", recMCPLease.Code, recMCPLease.Body.String())
+	}
+
+	recMCPList := callMCPTool(3, "list_leases", map[string]any{
+		"legal_entity_id": "ent_99",
+	})
+	if recMCPList.Code != http.StatusOK || !bytes.Contains(recMCPList.Body.Bytes(), []byte("lot_99")) || !bytes.Contains(recMCPList.Body.Bytes(), []byte("lot_100")) {
+		t.Fatalf("list_leases MCP failed (%d): %s", recMCPList.Code, recMCPList.Body.String())
 	}
 }

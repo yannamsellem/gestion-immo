@@ -39,3 +39,21 @@ func (r *LotRepo) ListLotsByProperty(_ context.Context, propertyID string) ([]do
 	copy(out, list)
 	return out, nil
 }
+
+// ListLotsByPropertyIDs returns all lots belonging to the given propertyIDs grouped by property_id.
+func (r *LotRepo) ListLotsByPropertyIDs(_ context.Context, propertyIDs []string) (map[string][]domain.Lot, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	grouped := make(map[string][]domain.Lot, len(propertyIDs))
+	for _, propID := range propertyIDs {
+		list := r.lotsByProp[propID]
+		if len(list) == 0 {
+			continue
+		}
+		out := make([]domain.Lot, len(list))
+		copy(out, list)
+		grouped[propID] = out
+	}
+	return grouped, nil
+}

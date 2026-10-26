@@ -54,6 +54,7 @@ func (r *RentCallRepo) SaveRentCalls(ctx context.Context, calls []domain.RentCal
 			    updated_at = EXCLUDED.updated_at
 		`
 		now := time.Now().UTC()
+		batch := &pgx.Batch{}
 		for _, rc := range calls {
 			createdAt := rc.CreatedAt
 			if createdAt.IsZero() {
@@ -63,7 +64,7 @@ func (r *RentCallRepo) SaveRentCalls(ctx context.Context, calls []domain.RentCal
 			if updatedAt.IsZero() {
 				updatedAt = now
 			}
-			_, err := conn.Exec(txCtx, query,
+			batch.Queue(query,
 				rc.ID,
 				rc.LeaseID,
 				rc.LegalEntityID,
@@ -79,13 +80,21 @@ func (r *RentCallRepo) SaveRentCalls(ctx context.Context, calls []domain.RentCal
 				createdAt,
 				updatedAt,
 			)
-			if err != nil {
+		}
+
+		br := conn.SendBatch(txCtx, batch)
+		for _, rc := range calls {
+			if _, err := br.Exec(); err != nil {
+				_ = br.Close()
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					return domain.ErrDuplicatePeriod
 				}
 				return fmt.Errorf("lease/postgres/rent_call_repo: save rent call %s: %w", rc.ID, err)
 			}
+		}
+		if err := br.Close(); err != nil {
+			return fmt.Errorf("lease/postgres/rent_call_repo: close batch: %w", err)
 		}
 		return nil
 	})

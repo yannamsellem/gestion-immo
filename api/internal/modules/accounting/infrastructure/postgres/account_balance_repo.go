@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
@@ -27,6 +28,10 @@ func NewAccountBalanceRepo(pool *pgxpool.Pool, db postgres.DBTX) *AccountBalance
 
 // UpsertAccountBalanceLines inserts or updates account balance lines for a legal entity and fiscal year atomically.
 func (r *AccountBalanceRepo) UpsertAccountBalanceLines(ctx context.Context, entityID string, fiscalYear int, lines []domain.AccountBalanceLine) error {
+	if len(lines) == 0 {
+		return nil
+	}
+
 	return postgres.WithinTransaction(ctx, r.pool, func(txCtx context.Context) error {
 		conn := postgres.Conn(txCtx, r.db)
 
@@ -51,12 +56,13 @@ func (r *AccountBalanceRepo) UpsertAccountBalanceLines(ctx context.Context, enti
 				net_n_minus_1_cents = EXCLUDED.net_n_minus_1_cents,
 				updated_at = NOW()
 		`
+		batch := &pgx.Batch{}
 		for _, line := range lines {
 			id := line.ID
 			if id == "" {
 				id = fmt.Sprintf("%s_%d_%s", entityID, fiscalYear, line.LineID)
 			}
-			if _, err := conn.Exec(txCtx, query,
+			batch.Queue(query,
 				id,
 				entityID,
 				fiscalYear,
@@ -69,9 +75,18 @@ func (r *AccountBalanceRepo) UpsertAccountBalanceLines(ctx context.Context, enti
 				int64(line.DepreciationNCents),
 				int64(line.NetNCents),
 				int64(line.NetNMinus1Cents),
-			); err != nil {
+			)
+		}
+
+		br := conn.SendBatch(txCtx, batch)
+		for _, line := range lines {
+			if _, err := br.Exec(); err != nil {
+				_ = br.Close()
 				return fmt.Errorf("accounting/postgres/account_balance_repo: upsert account balance line %s: %w", line.LineID, err)
 			}
+		}
+		if err := br.Close(); err != nil {
+			return fmt.Errorf("accounting/postgres/account_balance_repo: close batch: %w", err)
 		}
 
 		return nil

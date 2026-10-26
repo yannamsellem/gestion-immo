@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
@@ -69,29 +70,41 @@ func (r *JournalEntryRepo) SaveJournalEntry(ctx context.Context, entry domain.Jo
 				$17, $18, $19
 			)
 		`
-		for _, line := range entry.Lines {
-			if _, err := conn.Exec(txCtx, insertLine,
-				line.ID,
-				entry.ID,
-				entry.LegalEntityID,
-				entry.FiscalYear,
-				line.LineID,
-				line.AccountCode,
-				line.AccountLabel,
-				line.SubAccountCode,
-				line.SubAccountLabel,
-				line.Section,
-				line.Label,
-				int64(line.DebitCents),
-				int64(line.CreditCents),
-				int64(line.NetNMinus1Cents),
-				line.ReconciliationCode,
-				line.ReconciliationDate,
-				int64(line.ForeignCurrencyAmountCents),
-				line.CurrencyCode,
-				line.CreatedAt,
-			); err != nil {
-				return fmt.Errorf("accounting/postgres/journal_entry_repo: insert journal line %s: %w", line.ID, err)
+		if len(entry.Lines) > 0 {
+			batch := &pgx.Batch{}
+			for _, line := range entry.Lines {
+				batch.Queue(insertLine,
+					line.ID,
+					entry.ID,
+					entry.LegalEntityID,
+					entry.FiscalYear,
+					line.LineID,
+					line.AccountCode,
+					line.AccountLabel,
+					line.SubAccountCode,
+					line.SubAccountLabel,
+					line.Section,
+					line.Label,
+					int64(line.DebitCents),
+					int64(line.CreditCents),
+					int64(line.NetNMinus1Cents),
+					line.ReconciliationCode,
+					line.ReconciliationDate,
+					int64(line.ForeignCurrencyAmountCents),
+					line.CurrencyCode,
+					line.CreatedAt,
+				)
+			}
+
+			br := conn.SendBatch(txCtx, batch)
+			for _, line := range entry.Lines {
+				if _, err := br.Exec(); err != nil {
+					_ = br.Close()
+					return fmt.Errorf("accounting/postgres/journal_entry_repo: insert journal line %s: %w", line.ID, err)
+				}
+			}
+			if err := br.Close(); err != nil {
+				return fmt.Errorf("accounting/postgres/journal_entry_repo: close batch: %w", err)
 			}
 		}
 
@@ -138,34 +151,44 @@ func (r *JournalEntryRepo) ListJournalEntries(ctx context.Context, entityID stri
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close()
 
+	if len(entries) == 0 {
+		return entries, nil
+	}
+
+	entryIDs := make([]string, len(entries))
 	for i := range entries {
-		lines, err := r.loadJournalLines(ctx, entries[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		entries[i].Lines = lines
+		entryIDs[i] = entries[i].ID
+	}
+
+	linesByEntry, err := r.loadJournalLinesByEntryIDs(ctx, entryIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		entries[i].Lines = linesByEntry[entries[i].ID]
 	}
 	return entries, nil
 }
 
-func (r *JournalEntryRepo) loadJournalLines(ctx context.Context, entryID string) ([]domain.JournalLine, error) {
+func (r *JournalEntryRepo) loadJournalLinesByEntryIDs(ctx context.Context, entryIDs []string) (map[string][]domain.JournalLine, error) {
 	const query = `
 		SELECT id, journal_entry_id, legal_entity_id, fiscal_year, line_id,
 		       account_code, account_label, sub_account_code, sub_account_label, section, label,
 		       debit_cents, credit_cents, net_n_minus_1_cents, reconciliation_code, reconciliation_date,
 		       foreign_currency_amount_cents, currency_code, created_at
 		FROM journal_lines
-		WHERE journal_entry_id = $1
+		WHERE journal_entry_id = ANY($1)
 		ORDER BY id ASC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, entryID)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, entryIDs)
 	if err != nil {
 		return nil, fmt.Errorf("accounting/postgres/journal_entry_repo: load journal lines: %w", err)
 	}
 	defer rows.Close()
 
-	var lines []domain.JournalLine
+	grouped := make(map[string][]domain.JournalLine, len(entryIDs))
 	for rows.Next() {
 		var l domain.JournalLine
 		var debit, credit, nMinus1, foreignCurr int64
@@ -196,9 +219,9 @@ func (r *JournalEntryRepo) loadJournalLines(ctx context.Context, entryID string)
 		l.CreditCents = money.AmountCents(credit)
 		l.NetNMinus1Cents = money.AmountCents(nMinus1)
 		l.ForeignCurrencyAmountCents = money.AmountCents(foreignCurr)
-		lines = append(lines, l)
+		grouped[l.JournalEntryID] = append(grouped[l.JournalEntryID], l)
 	}
-	return lines, rows.Err()
+	return grouped, rows.Err()
 }
 
 // ListFECEntries returns all 18-column FEC entries for an entity and fiscal year ordered chronologically.

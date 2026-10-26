@@ -101,7 +101,7 @@ func (r *UserRepo) FindUserByEmail(ctx context.Context, email string) (*domain.U
 	const query = `
 		SELECT id, full_name, email, password_hash, role, status, approved_by, approved_at, created_at, updated_at
 		FROM users
-		WHERE LOWER(email) = LOWER($1)
+		WHERE email = LOWER($1)
 	`
 	row := platformpg.Conn(ctx, r.db).QueryRow(ctx, query, strings.TrimSpace(email))
 	return scanUser(row)

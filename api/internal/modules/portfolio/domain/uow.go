@@ -2,6 +2,12 @@ package domain
 
 import "context"
 
+// LotBatchRepository extends LotRepository with multi-property batch loading to avoid N+1 queries.
+type LotBatchRepository interface {
+	LotRepository
+	ListLotsByPropertyIDs(ctx context.Context, propertyIDs []string) (map[string][]Lot, error)
+}
+
 // Repositories groups the per-aggregate repositories participating in a cross-aggregate Unit of Work transaction.
 type Repositories struct {
 	LegalEntities LegalEntityRepository

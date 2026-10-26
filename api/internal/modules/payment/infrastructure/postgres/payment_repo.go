@@ -63,22 +63,33 @@ func (r *PaymentRepo) SavePayment(ctx context.Context, payment domain.Payment) e
 			return fmt.Errorf("payment/postgres/payment_repo: insert payment %s: %w", payment.ID, err)
 		}
 
-		const insertAllocationQuery = `
-			INSERT INTO rent_allocations (
-				id, payment_id, rent_call_id, period_month, applied_cents, created_at
-			) VALUES ($1, $2, $3, $4, $5, $6)
-		`
-		for _, alloc := range payment.Allocations {
-			_, err := conn.Exec(txCtx, insertAllocationQuery,
-				alloc.ID,
-				payment.ID,
-				alloc.RentCallID,
-				alloc.PeriodMonth,
-				int64(alloc.AppliedCents),
-				alloc.CreatedAt,
-			)
-			if err != nil {
-				return fmt.Errorf("payment/postgres/payment_repo: insert allocation %s: %w", alloc.ID, err)
+		if len(payment.Allocations) > 0 {
+			const insertAllocationQuery = `
+				INSERT INTO rent_allocations (
+					id, payment_id, rent_call_id, period_month, applied_cents, created_at
+				) VALUES ($1, $2, $3, $4, $5, $6)
+			`
+			batch := &pgx.Batch{}
+			for _, alloc := range payment.Allocations {
+				batch.Queue(insertAllocationQuery,
+					alloc.ID,
+					payment.ID,
+					alloc.RentCallID,
+					alloc.PeriodMonth,
+					int64(alloc.AppliedCents),
+					alloc.CreatedAt,
+				)
+			}
+
+			br := conn.SendBatch(txCtx, batch)
+			for _, alloc := range payment.Allocations {
+				if _, err := br.Exec(); err != nil {
+					_ = br.Close()
+					return fmt.Errorf("payment/postgres/payment_repo: insert allocation %s: %w", alloc.ID, err)
+				}
+			}
+			if err := br.Close(); err != nil {
+				return fmt.Errorf("payment/postgres/payment_repo: close batch: %w", err)
 			}
 		}
 
@@ -157,31 +168,49 @@ func (r *PaymentRepo) collectPaymentsWithAllocations(ctx context.Context, rows p
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("payment/postgres/payment_repo: iterate payments: %w", err)
 	}
+	rows.Close()
 
+	if len(payments) == 0 {
+		return payments, nil
+	}
+
+	paymentIDs := make([]string, len(payments))
 	for i := range payments {
-		allocs, err := r.listAllocationsByPayment(ctx, payments[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		payments[i].Allocations = allocs
+		paymentIDs[i] = payments[i].ID
+	}
+
+	allocsByPayment, err := r.listAllocationsByPaymentIDs(ctx, paymentIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range payments {
+		payments[i].Allocations = allocsByPayment[payments[i].ID]
 	}
 	return payments, nil
 }
 
 func (r *PaymentRepo) listAllocationsByPayment(ctx context.Context, paymentID string) ([]domain.RentAllocation, error) {
+	grouped, err := r.listAllocationsByPaymentIDs(ctx, []string{paymentID})
+	if err != nil {
+		return nil, err
+	}
+	return grouped[paymentID], nil
+}
+
+func (r *PaymentRepo) listAllocationsByPaymentIDs(ctx context.Context, paymentIDs []string) (map[string][]domain.RentAllocation, error) {
 	const query = `
 		SELECT id, payment_id, rent_call_id, period_month, applied_cents, created_at
 		FROM rent_allocations
-		WHERE payment_id = $1
+		WHERE payment_id = ANY($1)
 		ORDER BY created_at ASC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, paymentID)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, paymentIDs)
 	if err != nil {
-		return nil, fmt.Errorf("payment/postgres/payment_repo: list allocations for payment %s: %w", paymentID, err)
+		return nil, fmt.Errorf("payment/postgres/payment_repo: list allocations for payments: %w", err)
 	}
 	defer rows.Close()
 
-	var allocs []domain.RentAllocation
+	grouped := make(map[string][]domain.RentAllocation, len(paymentIDs))
 	for rows.Next() {
 		var a domain.RentAllocation
 		var applied int64
@@ -189,9 +218,9 @@ func (r *PaymentRepo) listAllocationsByPayment(ctx context.Context, paymentID st
 			return nil, fmt.Errorf("payment/postgres/payment_repo: scan allocation: %w", err)
 		}
 		a.AppliedCents = money.AmountCents(applied)
-		allocs = append(allocs, a)
+		grouped[a.PaymentID] = append(grouped[a.PaymentID], a)
 	}
-	return allocs, rows.Err()
+	return grouped, rows.Err()
 }
 
 func scanPayment(row pgx.Row) (*domain.Payment, error) {
