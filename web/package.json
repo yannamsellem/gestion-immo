@@ -1,0 +1,29 @@
+{
+	"name": "gestion-immo-web",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"test": "node --test src/lib/api/statement-state.test.ts",
+		"check": "node scripts/verify-svelte-structure.mjs"
+	},
+	"dependencies": {
+		"bits-ui": "^1.0.0",
+		"clsx": "^2.1.1",
+		"lucide-svelte": "^0.469.0",
+		"tailwind-merge": "^2.6.0"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-cloudflare": "^4.7.4",
+		"@sveltejs/kit": "^2.15.1",
+		"@sveltejs/vite-plugin-svelte": "^5.0.3",
+		"svelte": "^5.16.0",
+		"svelte-check": "^4.1.1",
+		"tailwindcss": "^3.4.17",
+		"typescript": "^5.7.2",
+		"vite": "^6.0.6",
+		"vitest": "^2.1.8"
+	}
+}

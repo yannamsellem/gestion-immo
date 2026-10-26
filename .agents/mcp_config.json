@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "svelte": {
+      "command": "npx",
+      "args": ["-y", "@sveltejs/mcp"]
+    },
+    "cloudflare-docs": { "serverUrl": "https://docs.mcp.cloudflare.com/mcp" }
+  }
+}

@@ -1,0 +1,79 @@
+# ==============================================================================
+# direnv & Environment Variables
+# ==============================================================================
+.envrc
+.direnv/
+.env
+.env.*
+!.env.example
+
+# ==============================================================================
+# Go (api/)
+# ==============================================================================
+api/bin/
+bin/
+api/keys/
+keys/
+*.pem
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# ==============================================================================
+# SvelteKit / Node / Cloudflare Pages (web/)
+# ==============================================================================
+node_modules/
+.svelte-kit/
+web/build/
+web/dist/
+.wrangler/
+.cloudflare/
+.output/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==============================================================================
+# Terraform (infra/terraform/)
+# ==============================================================================
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# ==============================================================================
+# Docker / PostgreSQL Dumps
+# ==============================================================================
+pg_data/
+*.sql.gz
+*.dump
+
+# ==============================================================================
+# OS, Editors & Local Scratch
+# ==============================================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.superpowers/

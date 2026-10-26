@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS lots;
+DROP TABLE IF EXISTS properties;
+DROP TABLE IF EXISTS shareholders;
+DROP TABLE IF EXISTS legal_entities;
