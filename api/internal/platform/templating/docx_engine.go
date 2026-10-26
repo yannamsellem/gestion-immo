@@ -20,6 +20,12 @@ func NewDocxEngine() *DocxEngine {
 	return &DocxEngine{}
 }
 
+const (
+	maxDocxZipEntries = 256
+	maxDocxEntryBytes = 16 << 20
+	maxDocxTotalBytes = 32 << 20
+)
+
 var (
 	splitTagBetweenBracesRe = regexp.MustCompile(`\{\{([^{}]*?)\}\}`)
 	xmlTagInsideBracesRe    = regexp.MustCompile(`<[^>]+>`)
@@ -42,22 +48,35 @@ func (e *DocxEngine) RenderDocx(
 	if err != nil {
 		return nil, fmt.Errorf("templating: invalid docx zip archive: %w", err)
 	}
+	if len(zr.File) > maxDocxZipEntries {
+		return nil, fmt.Errorf("templating: docx zip archive exceeds max entries (%d > %d)", len(zr.File), maxDocxZipEntries)
+	}
 
 	var outBuf bytes.Buffer
 	zw := zip.NewWriter(&outBuf)
 
 	foundDocumentXML := false
+	var totalReadBytes int64
 	for _, f := range zr.File {
 		rc, err := f.Open()
 		if err != nil {
 			_ = zw.Close()
 			return nil, fmt.Errorf("templating: open zip entry %s: %w", f.Name, err)
 		}
-		raw, err := io.ReadAll(rc)
+		raw, err := io.ReadAll(io.LimitReader(rc, maxDocxEntryBytes+1))
 		_ = rc.Close()
 		if err != nil {
 			_ = zw.Close()
 			return nil, fmt.Errorf("templating: read zip entry %s: %w", f.Name, err)
+		}
+		if int64(len(raw)) > maxDocxEntryBytes {
+			_ = zw.Close()
+			return nil, fmt.Errorf("templating: zip entry %s exceeds max size (%d bytes)", f.Name, maxDocxEntryBytes)
+		}
+		totalReadBytes += int64(len(raw))
+		if totalReadBytes > maxDocxTotalBytes {
+			_ = zw.Close()
+			return nil, fmt.Errorf("templating: docx archive exceeds max total decompressed size (%d bytes)", maxDocxTotalBytes)
 		}
 
 		if isWordXMLTarget(f.Name) {
@@ -313,7 +332,7 @@ func ExtractDocxText(r io.Reader) (string, error) {
 		}
 		defer rc.Close()
 
-		dec := xml.NewDecoder(rc)
+		dec := xml.NewDecoder(io.LimitReader(rc, maxDocxEntryBytes+1))
 		var out strings.Builder
 		for {
 			tok, err := dec.Token()

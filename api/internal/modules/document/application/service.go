@@ -29,6 +29,10 @@ type PortfolioPort interface {
 	GetEntityPortfolioSummary(ctx context.Context, entityID string) (portfolioapp.EntityPortfolioSummaryDTO, error)
 }
 
+type legalEntityLookupPort interface {
+	GetLegalEntityByID(ctx context.Context, entityID string) (portfolioapp.LegalEntityDTO, error)
+}
+
 // LeasePort defines the lease application operations consumed by the document bounded context.
 type LeasePort interface {
 	GetLeaseByID(ctx context.Context, leaseID string) (leaseapp.LeaseDTO, error)
@@ -191,6 +195,11 @@ func (s *Service) RegisterTemplate(ctx context.Context, cmd RegisterTemplateCmd)
 
 	var r2Key string
 	htmlBody := strings.TrimSpace(cmd.HTMLBody)
+	if htmlBody != "" {
+		if err := validateSafeHTMLTemplate(htmlBody); err != nil {
+			return DocumentTemplateDTO{}, err
+		}
+	}
 
 	if format == domain.FormatDocx {
 		docxPayload := cmd.DocxBytes
@@ -261,6 +270,27 @@ func (s *Service) AttachFileToR2(ctx context.Context, cmd AttachFileCmd) (Stored
 
 	entityID := strings.TrimSpace(cmd.LegalEntityID)
 	leaseID := strings.TrimSpace(cmd.LeaseID)
+	if leaseID != "" {
+		if !isSafeScopeID(leaseID) {
+			return StoredFileDTO{}, fmt.Errorf("%w: invalid lease_id", domain.ErrValidation)
+		}
+		if s.leaseSvc != nil {
+			if _, err := s.leaseSvc.GetLeaseByID(ctx, leaseID); err != nil {
+				return StoredFileDTO{}, err
+			}
+		}
+	}
+	if entityID != "" {
+		if !isSafeScopeID(entityID) {
+			return StoredFileDTO{}, fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
+		}
+		if s.portfolioSvc != nil {
+			if _, err := s.lookupLegalEntity(ctx, entityID); err != nil {
+				return StoredFileDTO{}, err
+			}
+		}
+	}
+
 	category := strings.ToUpper(strings.TrimSpace(cmd.Category))
 	if category == "" {
 		category = "ATTACHMENT"
@@ -344,11 +374,11 @@ func (s *Service) GenerateFromTemplate(ctx context.Context, cmd GenerateDocCmd) 
 	}
 
 	if entityID != "" && s.portfolioSvc != nil {
-		if summary, pErr := s.portfolioSvc.GetEntityPortfolioSummary(ctx, entityID); pErr == nil {
-			vars["societe.nom"] = summary.Entity.Name
-			vars["societe.siret"] = summary.Entity.SIRET
-			vars["societe.adresse"] = summary.Entity.Address
-			vars["societe.capital"] = summary.Entity.ShareCapitalCents.FormatEUR()
+		if entity, pErr := s.lookupLegalEntity(ctx, entityID); pErr == nil {
+			vars["societe.nom"] = entity.Name
+			vars["societe.siret"] = entity.SIRET
+			vars["societe.adresse"] = entity.Address
+			vars["societe.capital"] = entity.ShareCapitalCents.FormatEUR()
 		}
 	}
 
@@ -576,8 +606,11 @@ func (s *Service) AssembleGLIDossier(ctx context.Context, leaseID string, templa
 		return GLIDossierArchiveDTO{}, err
 	}
 
+	const maxGLIAttachmentBytes = 64 << 20
 	storedAttachments, err := s.storedFiles.ListStoredFilesByLease(ctx, lease.ID)
 	if err == nil {
+		usedEntryNames := make(map[string]int)
+		var totalAttachmentBytes int64
 		for _, att := range storedAttachments {
 			if strings.HasSuffix(att.R2Key, ".zip") {
 				continue
@@ -586,12 +619,23 @@ func (s *Service) AssembleGLIDossier(ctx context.Context, leaseID string, templa
 			if dErr != nil {
 				continue
 			}
-			attBytes, rErr := io.ReadAll(rc)
+			remaining := maxGLIAttachmentBytes - totalAttachmentBytes
+			if remaining <= 0 {
+				_ = rc.Close()
+				_ = zw.Close()
+				return GLIDossierArchiveDTO{}, fmt.Errorf("%w: GLI attachments exceed max cumulative size (%d bytes)", domain.ErrValidation, maxGLIAttachmentBytes)
+			}
+			attBytes, rErr := io.ReadAll(io.LimitReader(rc, remaining+1))
 			_ = rc.Close()
 			if rErr != nil || len(attBytes) == 0 {
 				continue
 			}
-			entryName := "pieces_jointes/" + sanitizeFileName(att.FileName)
+			totalAttachmentBytes += int64(len(attBytes))
+			if totalAttachmentBytes > maxGLIAttachmentBytes {
+				_ = zw.Close()
+				return GLIDossierArchiveDTO{}, fmt.Errorf("%w: GLI attachments exceed max cumulative size (%d bytes)", domain.ErrValidation, maxGLIAttachmentBytes)
+			}
+			entryName := deduplicateAttachmentEntryName(sanitizeFileName(att.FileName), usedEntryNames)
 			if err := addZipEntry(entryName, attBytes); err != nil {
 				_ = zw.Close()
 				return GLIDossierArchiveDTO{}, err
@@ -828,6 +872,24 @@ func buildFormalNoticeHTML(
 	)
 }
 
+func validateSafeHTMLTemplate(htmlBody string) error {
+	lower := strings.ToLower(htmlBody)
+	for _, forbidden := range []string{
+		"<script",
+		"<iframe",
+		"<object",
+		"<embed",
+		"<link",
+		"javascript:",
+		"file://",
+	} {
+		if strings.Contains(lower, forbidden) {
+			return fmt.Errorf("%w: html_body contains forbidden active or external tags", domain.ErrValidation)
+		}
+	}
+	return nil
+}
+
 func interpolateHTMLTemplate(rawHTML string, vars map[string]string) string {
 	out := rawHTML
 	keys := make([]string, 0, len(vars))
@@ -839,6 +901,46 @@ func interpolateHTMLTemplate(rawHTML string, vars map[string]string) string {
 		out = strings.ReplaceAll(out, "{{"+k+"}}", html.EscapeString(vars[k]))
 	}
 	return out
+}
+
+func (s *Service) lookupLegalEntity(ctx context.Context, entityID string) (portfolioapp.LegalEntityDTO, error) {
+	if lookup, ok := s.portfolioSvc.(legalEntityLookupPort); ok {
+		return lookup.GetLegalEntityByID(ctx, entityID)
+	}
+	summary, err := s.portfolioSvc.GetEntityPortfolioSummary(ctx, entityID)
+	if err != nil {
+		return portfolioapp.LegalEntityDTO{}, err
+	}
+	return summary.Entity, nil
+}
+
+func isSafeScopeID(id string) bool {
+	if id == "" || strings.Contains(id, "..") {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func deduplicateAttachmentEntryName(baseName string, usedEntryNames map[string]int) string {
+	if baseName == "" {
+		baseName = "attachment"
+	}
+	usedEntryNames[baseName]++
+	count := usedEntryNames[baseName]
+	if count == 1 {
+		return "pieces_jointes/" + baseName
+	}
+	if dot := strings.LastIndex(baseName, "."); dot > 0 {
+		return fmt.Sprintf("pieces_jointes/%s_%d%s", baseName[:dot], count, baseName[dot:])
+	}
+	return fmt.Sprintf("pieces_jointes/%s_%d", baseName, count)
 }
 
 func sanitizeFileName(name string) string {

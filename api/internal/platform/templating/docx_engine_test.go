@@ -1,8 +1,10 @@
 package templating_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,6 +58,29 @@ func TestRenderDocx_EscapesXMLCharacters(t *testing.T) {
 	extracted := templating.ExtractTextFromDocx(t, bytes.NewReader(out))
 	if !strings.Contains(extracted, "SCI DUPONT & FILS <Sud>") {
 		t.Fatalf("expected XML-escaped entity name to round-trip cleanly, got: %s", extracted)
+	}
+}
+
+func TestRenderDocx_RejectsExcessiveEntriesOrSize(t *testing.T) {
+	engine := templating.NewDocxEngine()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for i := 0; i <= 256; i++ {
+		w, err := zw.Create(fmt.Sprintf("word/extra_%d.xml", i))
+		if err != nil {
+			t.Fatalf("create zip entry: %v", err)
+		}
+		if _, err := w.Write([]byte("<x/>")); err != nil {
+			t.Fatalf("write zip entry: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+
+	if _, err := engine.RenderDocx(buf.Bytes(), nil, nil); err == nil {
+		t.Fatal("expected RenderDocx to reject archive exceeding max entries, got nil")
 	}
 }
 

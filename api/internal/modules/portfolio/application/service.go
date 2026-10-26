@@ -210,6 +210,19 @@ func (s *Service) ListLegalEntities(ctx context.Context) ([]LegalEntityDTO, erro
 	return out, nil
 }
 
+// GetLegalEntityByID returns a single portfolio legal entity by ID without loading shareholders, properties, or lots.
+func (s *Service) GetLegalEntityByID(ctx context.Context, entityID string) (LegalEntityDTO, error) {
+	trimmedID := strings.TrimSpace(entityID)
+	if trimmedID == "" {
+		return LegalEntityDTO{}, fmt.Errorf("%w: entity id is required", domain.ErrValidation)
+	}
+	ent, err := s.entityRepo.FindLegalEntityByID(ctx, trimmedID)
+	if err != nil {
+		return LegalEntityDTO{}, err
+	}
+	return toLegalEntityDTO(*ent), nil
+}
+
 // UpsertShareholder creates or updates a shareholder on a legal entity and computes
 // DetentionBasisPoints using exact integer half-up rounding: (SharesCount * 10000 + TotalShares/2) / TotalShares.
 func (s *Service) UpsertShareholder(ctx context.Context, cmd UpsertShareholderCmd) (ShareholderDTO, error) {

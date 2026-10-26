@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/document/application"
+	"github.com/yannamsellem/gestion-immo/internal/modules/document/domain"
 	docmemory "github.com/yannamsellem/gestion-immo/internal/modules/document/infrastructure/memory"
 	dochttp "github.com/yannamsellem/gestion-immo/internal/modules/document/interfaces/http"
 	docmcp "github.com/yannamsellem/gestion-immo/internal/modules/document/interfaces/mcp"
@@ -263,5 +265,169 @@ func TestAssembleGLIDossier_PopulatesDocxRendersLedgerAndBundlesR2Attachments(t 
 	reg.ServeHTTP(recMCP, reqMCP)
 	if recMCP.Code != http.StatusOK || !strings.Contains(recMCP.Body.String(), "160000") {
 		t.Fatalf("unexpected MCP generate_gli_dossier response (%d): %s", recMCP.Code, recMCP.Body.String())
+	}
+}
+
+func TestDocumentService_SecurityAndDuplicateGLIAttachments(t *testing.T) {
+	ctx := context.Background()
+
+	entityRepo := portfoliomemory.NewLegalEntityRepo()
+	shareholderRepo := portfoliomemory.NewShareholderRepo()
+	propertyRepo := portfoliomemory.NewPropertyRepo()
+	lotRepo := portfoliomemory.NewLotRepo()
+	portfolioUoW := portfoliomemory.NewUnitOfWork(entityRepo, shareholderRepo, propertyRepo, lotRepo)
+	portfolioSvc := portfolioapp.NewService(entityRepo, shareholderRepo, propertyRepo, lotRepo, portfolioUoW)
+
+	tenantRepo := leasememory.NewTenantRepo()
+	leaseRepo := leasememory.NewLeaseRepo()
+	rentCallRepo := leasememory.NewRentCallRepo()
+	leaseUoW := leasememory.NewUnitOfWork(tenantRepo, leaseRepo, rentCallRepo)
+	leaseSvc := leaseapp.NewService(tenantRepo, leaseRepo, rentCallRepo, leaseUoW)
+
+	r2Store := r2.NewInMemoryStorage()
+	pdfEngine := templating.NewInMemoryPdfEngine()
+	docxEngine := templating.NewDocxEngine()
+
+	docTemplateRepo := docmemory.NewDocumentTemplateRepo()
+	storedFileRepo := docmemory.NewStoredFileRepo()
+	gliDossierRepo := docmemory.NewGLIDossierRepo()
+	docUoW := docmemory.NewUnitOfWork(docTemplateRepo, storedFileRepo, gliDossierRepo)
+	docSvc := application.NewService(
+		docTemplateRepo,
+		storedFileRepo,
+		gliDossierRepo,
+		docUoW,
+		r2Store,
+		docxEngine,
+		pdfEngine,
+		portfolioSvc,
+		leaseSvc,
+		nil,
+	)
+
+	// 1. RegisterTemplate rejects HTML containing <script> or <iframe> with domain.ErrValidation
+	for _, unsafeHTML := range []string{
+		"<html><body><script>alert(1)</script></body></html>",
+		"<html><body><IFRAME src=\"http://postgres:5432\"></IFRAME></body></html>",
+	} {
+		_, err := docSvc.RegisterTemplate(ctx, application.RegisterTemplateCmd{
+			Name:         "Unsafe Template",
+			TemplateType: "CUSTOM",
+			Format:       "HTML",
+			HTMLBody:     unsafeHTML,
+		})
+		if !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("expected domain.ErrValidation for unsafe HTML %q, got %v", unsafeHTML, err)
+		}
+	}
+
+	// 2. AttachFileToR2 rejects lease_id containing "../" or "a/b" before uploading to R2
+	for _, invalidLeaseID := range []string{"../", "../secret", "a/b"} {
+		_, err := docSvc.AttachFileToR2(ctx, application.AttachFileCmd{
+			LeaseID:     invalidLeaseID,
+			Category:    "ATTACHMENT",
+			FileName:    "test.pdf",
+			ContentType: "application/pdf",
+			Content:     []byte("%PDF-1.4 test"),
+		})
+		if !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("expected domain.ErrValidation for invalid lease_id %q, got %v", invalidLeaseID, err)
+		}
+	}
+
+	// 3. AssembleGLIDossier deduplicates two lease attachments both named "quittance.pdf"
+	entity, err := portfolioSvc.CreateLegalEntity(ctx, portfolioapp.CreateLegalEntityCmd{
+		Name:              "SCI AZUR",
+		EntityType:        "SCI_IR",
+		SIRET:             "55123456700011",
+		ShareCapitalCents: 1000_00,
+		TotalShares:       100,
+	})
+	if err != nil {
+		t.Fatalf("create entity: %v", err)
+	}
+	prop, err := portfolioSvc.CreateProperty(ctx, portfolioapp.CreatePropertyCmd{
+		LegalEntityID:      entity.ID,
+		Label:              "Immeuble Azur",
+		PropertyType:       "BUILDING",
+		AccountingCategory: "FIXED_ASSET",
+		AcquisitionCents:   100000_00,
+	})
+	if err != nil {
+		t.Fatalf("create property: %v", err)
+	}
+	lot, err := portfolioSvc.CreateLot(ctx, portfolioapp.CreateLotCmd{
+		PropertyID: prop.ID,
+		Label:      "Lot 1",
+		LotType:    "APARTMENT",
+		SurfaceM2:  45,
+	})
+	if err != nil {
+		t.Fatalf("create lot: %v", err)
+	}
+	tenant, err := leaseSvc.CreateTenant(ctx, leaseapp.CreateTenantCmd{
+		FullName: "Marie Martin",
+		Email:    "marie@example.fr",
+	})
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	lease, err := leaseSvc.CreateLease(ctx, leaseapp.CreateLeaseCmd{
+		LegalEntityID:   entity.ID,
+		LotID:           lot.ID,
+		TenantID:        tenant.ID,
+		LeaseType:       "RESIDENTIAL_UNFURNISHED",
+		RentNetCents:    600_00,
+		ChargesCents:    50_00,
+		GLIPolicyNumber: "GLI-AZUR-01",
+		StartDate:       "2026-01-01",
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+	if _, err := leaseSvc.GenerateMonthlyRentCalls(ctx, entity.ID, "2026-01"); err != nil {
+		t.Fatalf("generate rent calls: %v", err)
+	}
+
+	for _, body := range []string{"%PDF-1.4 QUITTANCE 1", "%PDF-1.4 QUITTANCE 2"} {
+		if _, err := docSvc.AttachFileToR2(ctx, application.AttachFileCmd{
+			LegalEntityID: entity.ID,
+			LeaseID:       lease.ID,
+			Category:      "QUITTANCE",
+			FileName:      "quittance.pdf",
+			ContentType:   "application/pdf",
+			Content:       []byte(body),
+		}); err != nil {
+			t.Fatalf("attach quittance.pdf: %v", err)
+		}
+	}
+
+	dossier, err := docSvc.AssembleGLIDossier(ctx, lease.ID, "")
+	if err != nil {
+		t.Fatalf("AssembleGLIDossier: %v", err)
+	}
+
+	rc, err := r2Store.Download(ctx, dossier.ArchiveR2Key)
+	if err != nil {
+		t.Fatalf("download GLI zip: %v", err)
+	}
+	defer rc.Close()
+	zipBytes, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read GLI zip: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		t.Fatalf("open GLI zip: %v", err)
+	}
+
+	entrySet := make(map[string]bool)
+	for _, f := range zr.File {
+		entrySet[f.Name] = true
+	}
+	for _, expected := range []string{"pieces_jointes/quittance.pdf", "pieces_jointes/quittance_2.pdf"} {
+		if !entrySet[expected] {
+			t.Fatalf("expected %q in GLI archive, got %v", expected, dossier.IncludedFiles)
+		}
 	}
 }
