@@ -6,15 +6,21 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"html"
 	"strings"
 	"time"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
+	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/infrastructure"
+	portfolioapp "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/application"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
 )
+
+// PortfolioPort defines the portfolio application operations consumed by the accounting bounded context.
+type PortfolioPort interface {
+	GetEntityPortfolioSummary(ctx context.Context, entityID string) (portfolioapp.EntityPortfolioSummaryDTO, error)
+}
 
 // JournalLineInput carries a single debit or credit line when recording a PCG journal entry.
 type JournalLineInput struct {
@@ -111,6 +117,7 @@ type Service struct {
 	pdfEngine              templating.PdfEngine
 	fecExporter            domain.FECExporterPort
 	annualAccountsRenderer domain.AnnualAccountsPDFRendererPort
+	portfolioSvc           PortfolioPort
 }
 
 // NewService constructs an accounting application Service via constructor injection.
@@ -123,7 +130,18 @@ func NewService(
 	pdfEngine templating.PdfEngine,
 	fecExporter domain.FECExporterPort,
 	annualAccountsRenderer domain.AnnualAccountsPDFRendererPort,
+	portfolioPorts ...PortfolioPort,
 ) *Service {
+	if fecExporter == nil {
+		fecExporter = infrastructure.NewFECExporter()
+	}
+	if annualAccountsRenderer == nil {
+		annualAccountsRenderer = infrastructure.NewAnnualAccountsPDFRenderer(pdfEngine)
+	}
+	var portfolioSvc PortfolioPort
+	if len(portfolioPorts) > 0 {
+		portfolioSvc = portfolioPorts[0]
+	}
 	return &Service{
 		journalEntries:         journalEntries,
 		accountBalances:        accountBalances,
@@ -134,7 +152,14 @@ func NewService(
 		pdfEngine:              pdfEngine,
 		fecExporter:            fecExporter,
 		annualAccountsRenderer: annualAccountsRenderer,
+		portfolioSvc:           portfolioSvc,
 	}
+}
+
+// WithPortfolioPort attaches a live PortfolioPort to the accounting Service for resolving legal entity and shareholder metadata.
+func (s *Service) WithPortfolioPort(port PortfolioPort) *Service {
+	s.portfolioSvc = port
+	return s
 }
 
 // RecordJournalEntry validates and persists a balanced double-entry PCG journal entry
@@ -372,20 +397,15 @@ func (s *Service) GenerateAnnualAccountsPDF(
 		return StoredFileDTO{}, err
 	}
 
-	meta := defaultAnnualAccountsMetadata(trimmedEntity, fiscalYear)
+	meta := s.resolveAnnualAccountsMetadata(ctx, trimmedEntity, fiscalYear)
 
-	var pdfBytes []byte
-	if s.annualAccountsRenderer != nil {
-		pdfBytes, err = s.annualAccountsRenderer.RenderAnnualAccountsPDF(ctx, meta, stmt)
-		if err != nil {
-			return StoredFileDTO{}, fmt.Errorf("accounting: render annual accounts pdf: %w", err)
-		}
-	} else {
-		htmlDoc := buildFallbackAnnualAccountsHTML(meta, stmt)
-		pdfBytes, err = s.pdfEngine.RenderHTMLToPDF(ctx, htmlDoc)
-		if err != nil {
-			return StoredFileDTO{}, fmt.Errorf("accounting: render fallback annual accounts pdf: %w", err)
-		}
+	renderer := s.annualAccountsRenderer
+	if renderer == nil {
+		renderer = infrastructure.NewAnnualAccountsPDFRenderer(s.pdfEngine)
+	}
+	pdfBytes, err := renderer.RenderAnnualAccountsPDF(ctx, meta, stmt)
+	if err != nil {
+		return StoredFileDTO{}, fmt.Errorf("accounting: render annual accounts pdf: %w", err)
 	}
 
 	reportID, err := generateID("aar")
@@ -450,10 +470,11 @@ func (s *Service) ExportEntityFEC(ctx context.Context, entityID string, fiscalYe
 		return nil, err
 	}
 
-	if s.fecExporter != nil {
-		return s.fecExporter.ExportFEC(entries)
+	exporter := s.fecExporter
+	if exporter == nil {
+		exporter = infrastructure.NewFECExporter()
 	}
-	return exportFallbackFEC(entries), nil
+	return exporter.ExportFEC(entries)
 }
 
 func (s *Service) syncBalanceLinesFromEntry(ctx context.Context, balancesRepo domain.AccountBalanceRepository, entry domain.JournalEntry) error {
@@ -462,20 +483,31 @@ func (s *Service) syncBalanceLinesFromEntry(ctx context.Context, balancesRepo do
 		return err
 	}
 	byLineID := make(map[string]domain.AccountBalanceLine, len(existing))
+	lineIDByAccountCode := make(map[string]string, len(existing))
 	for _, l := range existing {
 		byLineID[l.LineID] = l
+		if code := strings.TrimSpace(l.AccountCode); code != "" {
+			if _, exists := lineIDByAccountCode[code]; !exists {
+				lineIDByAccountCode[code] = l.LineID
+			}
+		}
 	}
 
-	var updated []domain.AccountBalanceLine
+	var touchedOrder []string
+	touched := make(map[string]bool, len(entry.Lines))
 	for _, jl := range entry.Lines {
 		sec := domain.StatementSection(jl.Section)
 		if sec == "" {
 			sec = domain.InferSectionFromAccountCode(jl.AccountCode)
 		}
 		netDelta := computeSignedLineAmount(sec, jl.DebitCents, jl.CreditCents)
-		lineID := jl.LineID
-		if lineID == "" {
-			lineID = "acct_" + jl.AccountCode
+		lineID := strings.TrimSpace(jl.LineID)
+		if lineID == "" || lineID == "acct_"+jl.AccountCode {
+			if existingLineID, ok := lineIDByAccountCode[strings.TrimSpace(jl.AccountCode)]; ok {
+				lineID = existingLineID
+			} else if lineID == "" {
+				lineID = "acct_" + jl.AccountCode
+			}
 		}
 
 		cur, exists := byLineID[lineID]
@@ -491,6 +523,11 @@ func (s *Service) syncBalanceLinesFromEntry(ctx context.Context, balancesRepo do
 				NetNCents:       netDelta,
 				NetNMinus1Cents: jl.NetNMinus1Cents,
 			}
+			if code := strings.TrimSpace(jl.AccountCode); code != "" {
+				if _, ok := lineIDByAccountCode[code]; !ok {
+					lineIDByAccountCode[code] = lineID
+				}
+			}
 		} else {
 			cur.NetNCents = cur.NetNCents.Add(netDelta)
 			if jl.NetNMinus1Cents != 0 && cur.NetNMinus1Cents == 0 {
@@ -498,7 +535,15 @@ func (s *Service) syncBalanceLinesFromEntry(ctx context.Context, balancesRepo do
 			}
 		}
 		byLineID[lineID] = cur
-		updated = append(updated, cur)
+		if !touched[lineID] {
+			touched[lineID] = true
+			touchedOrder = append(touchedOrder, lineID)
+		}
+	}
+
+	updated := make([]domain.AccountBalanceLine, 0, len(touchedOrder))
+	for _, id := range touchedOrder {
+		updated = append(updated, byLineID[id])
 	}
 
 	return balancesRepo.UpsertAccountBalanceLines(ctx, entry.LegalEntityID, entry.FiscalYear, updated)
@@ -593,6 +638,45 @@ func defaultSGCAMBalanceLines(entityID string, fiscalYear int) []domain.AccountB
 	}
 }
 
+func (s *Service) resolveAnnualAccountsMetadata(ctx context.Context, entityID string, fiscalYear int) domain.AnnualAccountsMetadata {
+	if s.portfolioSvc != nil {
+		summary, err := s.portfolioSvc.GetEntityPortfolioSummary(ctx, entityID)
+		if err == nil && strings.TrimSpace(summary.Entity.ID) != "" {
+			shareholders := make([]domain.ShareholderCapitalRow, 0, len(summary.Shareholders))
+			for _, sh := range summary.Shareholders {
+				role := "Associé"
+				if sh.RemunerationPaidCents > 0 {
+					role = "Gérant Associé"
+				}
+				shareholders = append(shareholders, domain.ShareholderCapitalRow{
+					FullName:              sh.FullName,
+					Role:                  role,
+					SharesCount:           sh.SharesCount,
+					DetentionBasisPoints:  sh.DetentionBasisPoints,
+					CurrentAccountCents:   sh.CurrentAccountCents,
+					RemunerationPaidCents: sh.RemunerationPaidCents,
+				})
+			}
+			return domain.AnnualAccountsMetadata{
+				LegalEntityID:     summary.Entity.ID,
+				EntityName:        summary.Entity.Name,
+				EntityType:        string(summary.Entity.EntityType),
+				SIRET:             summary.Entity.SIRET,
+				NAFCode:           summary.Entity.NAFCode,
+				Address:           summary.Entity.Address,
+				FiscalYear:        fiscalYear,
+				PeriodStart:       fmt.Sprintf("01/01/%d", fiscalYear),
+				PeriodEnd:         fmt.Sprintf("31/12/%d", fiscalYear),
+				ShareCapitalCents: summary.Entity.ShareCapitalCents,
+				TotalShares:       summary.Entity.TotalShares,
+				AccountantFirm:    "Cabinet SGCAM — Société de Gestion et de Comptabilité",
+				Shareholders:      shareholders,
+			}
+		}
+	}
+	return defaultAnnualAccountsMetadata(entityID, fiscalYear)
+}
+
 func defaultAnnualAccountsMetadata(entityID string, fiscalYear int) domain.AnnualAccountsMetadata {
 	return domain.AnnualAccountsMetadata{
 		LegalEntityID:     entityID,
@@ -626,78 +710,6 @@ func defaultAnnualAccountsMetadata(entityID string, fiscalYear int) domain.Annua
 			},
 		},
 	}
-}
-
-func buildFallbackAnnualAccountsHTML(meta domain.AnnualAccountsMetadata, stmt domain.ComputedFinancialStatementsDTO) string {
-	var sb strings.Builder
-	sb.WriteString("<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"UTF-8\"><title>Comptes Annuels</title></head><body>")
-	sb.WriteString(fmt.Sprintf("<h1>COMPTES ANNUELS &amp; LIASSE FISCALE %d — %s</h1>", meta.FiscalYear, html.EscapeString(meta.EntityName)))
-	sb.WriteString("<h2>CERFA 2065, 2050, 2051, 2052, 2053, 2054, 2055, 2057, 2058-A/B/C, 2059-F, 1330-CVAE, 2072 &amp; SIG</h2>")
-	sb.WriteString("<table><thead><tr><th>Compte</th><th>Libellé</th><th>Net N</th><th>Net N-1</th><th>Variation %</th></tr></thead><tbody>")
-	for _, l := range stmt.Lines {
-		if l.Disabled {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
-			html.EscapeString(l.AccountCode),
-			html.EscapeString(l.Label),
-			html.EscapeString(l.NetNCents.FormatEUR()),
-			html.EscapeString(l.NetNMinus1Cents.FormatEUR()),
-			html.EscapeString(domain.FormatVariationPercent(l.NetNCents, l.NetNMinus1Cents)),
-		))
-	}
-	sb.WriteString("</tbody></table>")
-	sb.WriteString(fmt.Sprintf("<p>Total Produits d'Exploitation : %s | Résultat de l'exercice : %s | Bilan Passif Résultat : %s</p>",
-		html.EscapeString(stmt.TotalOperatingRevenueNCents.FormatEUR()),
-		html.EscapeString(stmt.NetIncomeNCents.FormatEUR()),
-		html.EscapeString(stmt.BalanceSheetNetIncomeNCents.FormatEUR())))
-	sb.WriteString("</body></html>")
-	return sb.String()
-}
-
-func exportFallbackFEC(entries []domain.FECEntry) []byte {
-	cols := []string{
-		"JournalCode", "JournalLib", "EcritureNum", "EcritureDate",
-		"CompteNum", "CompteLib", "CompAuxNum", "CompAuxLib",
-		"PieceRef", "PieceDate", "EcritureLib", "Debit", "Credit",
-		"EcritureLet", "DateLet", "ValidDate", "Montantdevise", "Idevise",
-	}
-	var buf bytes.Buffer
-	buf.WriteString(strings.Join(cols, "\t"))
-	buf.WriteByte('\n')
-	for _, row := range entries {
-		dt := row.EntryDate.UTC().Format("20060102")
-		pdt := row.DocumentDate.UTC().Format("20060102")
-		vdt := row.ValidationDate.UTC().Format("20060102")
-		curr := row.CurrencyCode
-		if curr == "" {
-			curr = "EUR"
-		}
-		foreignAmount := ""
-		if row.ForeignCurrencyAmountCents != 0 {
-			foreignAmount = formatCentsFEC(row.ForeignCurrencyAmountCents)
-		}
-		line := []string{
-			row.JournalCode, row.JournalLabel, row.EntryNumber, dt,
-			row.AccountCode, row.AccountLabel, row.SubAccountCode, row.SubAccountLabel,
-			row.DocumentRef, pdt, row.EntryLabel,
-			formatCentsFEC(row.DebitCents), formatCentsFEC(row.CreditCents),
-			row.ReconciliationCode, row.ReconciliationDate, vdt, foreignAmount, curr,
-		}
-		buf.WriteString(strings.Join(line, "\t"))
-		buf.WriteByte('\n')
-	}
-	return buf.Bytes()
-}
-
-func formatCentsFEC(c money.AmountCents) string {
-	val := int64(c)
-	sign := ""
-	if val < 0 {
-		sign = "-"
-		val = -val
-	}
-	return fmt.Sprintf("%s%d,%02d", sign, val/100, val%100)
 }
 
 func toJournalEntryDTO(entry domain.JournalEntry) JournalEntryDTO {

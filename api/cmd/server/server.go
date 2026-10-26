@@ -97,7 +97,7 @@ func BuildHTTPHandler(pool *pgxpool.Pool, cfg config.Config) (http.Handler, erro
 		paymentMod.Service(),
 	)
 	inspectionMod := inspection.NewModule(pool, r2Storage, pdfEngine)
-	accountingMod := accounting.NewModule(pool, r2Storage, pdfEngine)
+	accountingMod := accounting.NewModule(pool, r2Storage, pdfEngine, portfolioMod.Service())
 
 	mcpRegistry := mcpserver.NewRegistry(authMod.Service().ValidateMCPBearer)
 	portfolioMod.RegisterMCPTools(mcpRegistry)

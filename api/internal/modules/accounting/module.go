@@ -23,8 +23,8 @@ type Module struct {
 	handler *acchttp.Handler
 }
 
-// NewModule initializes the accounting Module from low-level platform dependencies (pool, storage, pdfEngine).
-func NewModule(pool *pgxpool.Pool, storage r2.ObjectStorage, pdfEngine templating.PdfEngine) *Module {
+// NewModule initializes the accounting Module from low-level platform dependencies (pool, storage, pdfEngine) and an optional PortfolioPort.
+func NewModule(pool *pgxpool.Pool, storage r2.ObjectStorage, pdfEngine templating.PdfEngine, portfolioPorts ...application.PortfolioPort) *Module {
 	var (
 		journalEntries  domain.JournalEntryRepository
 		accountBalances domain.AccountBalanceRepository
@@ -55,6 +55,7 @@ func NewModule(pool *pgxpool.Pool, storage r2.ObjectStorage, pdfEngine templatin
 		pdfEngine,
 		fecExporter,
 		annualAccountsRenderer,
+		portfolioPorts...,
 	)
 	handler := acchttp.NewHandler(svc)
 	return &Module{
