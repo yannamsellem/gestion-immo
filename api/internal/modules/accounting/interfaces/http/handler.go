@@ -143,10 +143,22 @@ func (h *Handler) handleExportFEC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	safeEntityID := sanitizeFilenameToken(entityID)
 	w.Header().Set("Content-Type", "text/tab-separated-values; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%sFEC%d1231.txt\"", strings.TrimSpace(entityID), fiscalYear))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%sFEC%d1231.txt\"", safeEntityID, fiscalYear))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(fecBytes)
+}
+
+func sanitizeFilenameToken(raw string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(raw) {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func decodeOptionalStatementsRequest(r *http.Request) (statementsRequest, error) {
@@ -182,6 +194,6 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrReportNotFound):
 		httpx.NotFound(w, err.Error())
 	default:
-		httpx.InternalError(w, "internal accounting error")
+		httpx.LogInternalError(w, "internal accounting error", err)
 	}
 }

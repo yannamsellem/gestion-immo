@@ -43,7 +43,10 @@ func (h *Handler) handleRegisterTemplate(w http.ResponseWriter, r *http.Request)
 		DocxBase64    string `json:"docx_base64,omitempty"`
 		HTMLBody      string `json:"html_body,omitempty"`
 	}
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, httpx.MaxUploadBodyBytes)
+	}
+	if err := httpx.DecodeJSONWithLimit(r, &req, httpx.MaxUploadBodyBytes); err != nil {
 		httpx.BadRequest(w, err.Error())
 		return
 	}
@@ -106,7 +109,7 @@ func (h *Handler) handleAttachFile(w http.ResponseWriter, r *http.Request) {
 	var cmd application.AttachFileCmd
 
 	if strings.Contains(contentType, "multipart/form-data") {
-		r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
+		r.Body = http.MaxBytesReader(w, r.Body, httpx.MaxUploadBodyBytes)
 		if err := r.ParseMultipartForm(20 << 20); err != nil {
 			httpx.BadRequest(w, "invalid multipart form")
 			return
@@ -138,7 +141,10 @@ func (h *Handler) handleAttachFile(w http.ResponseWriter, r *http.Request) {
 			ContentType   string `json:"content_type"`
 			ContentBase64 string `json:"content_base64"`
 		}
-		if err := httpx.DecodeJSON(r, &body); err != nil {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, httpx.MaxUploadBodyBytes)
+		}
+		if err := httpx.DecodeJSONWithLimit(r, &body, httpx.MaxUploadBodyBytes); err != nil {
 			httpx.BadRequest(w, err.Error())
 			return
 		}
@@ -234,6 +240,6 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, portfoliodomain.ErrLegalEntityNotFound):
 		httpx.NotFound(w, err.Error())
 	default:
-		httpx.InternalError(w, "internal document error")
+		httpx.LogInternalError(w, "internal document error", err)
 	}
 }

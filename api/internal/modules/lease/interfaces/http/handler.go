@@ -175,6 +175,6 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrRentCallNotFound):
 		httpx.NotFound(w, err.Error())
 	default:
-		httpx.InternalError(w, "internal lease error")
+		httpx.LogInternalError(w, "internal lease error", err)
 	}
 }

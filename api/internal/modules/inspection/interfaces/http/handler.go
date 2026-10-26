@@ -211,6 +211,6 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrIncidentNotFound):
 		httpx.NotFound(w, err.Error())
 	default:
-		httpx.InternalError(w, "internal inspection error")
+		httpx.LogInternalError(w, "internal inspection error", err)
 	}
 }

@@ -106,6 +106,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
 	httpx.OK(w, authTokensResponse{
 		AccessToken:  tokens.AccessToken.Value(),
 		RefreshToken: tokens.RefreshToken.Value(),
@@ -127,6 +128,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
 	httpx.OK(w, authTokensResponse{
 		AccessToken:  tokens.AccessToken.Value(),
 		RefreshToken: tokens.RefreshToken.Value(),
@@ -171,6 +173,7 @@ func (h *Handler) handleCreateMCPToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
 	httpx.Created(w, mcpTokenResponse{
 		Token: rawToken.Value(),
 		Label: req.Label,
@@ -243,6 +246,6 @@ func writeDomainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, domain.ErrUserNotFound):
 		httpx.NotFound(w, err.Error())
 	default:
-		httpx.InternalError(w, "internal authentication error")
+		httpx.LogInternalError(w, "internal authentication error", err)
 	}
 }

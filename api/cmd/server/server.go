@@ -126,7 +126,7 @@ func BuildHTTPHandler(pool *pgxpool.Pool, cfg config.Config) (http.Handler, erro
 	mux.Handle("GET /mcp", mcpRegistry)
 	mux.Handle("GET /.well-known/oauth-protected-resource", mcpRegistry.ProtectedResourceMetadataHandler())
 
-	return mux, nil
+	return httpx.RequestLogger(mux), nil
 }
 
 func serveHTTP(ctx context.Context, addr string, handler http.Handler) error {
@@ -134,6 +134,9 @@ func serveHTTP(ctx context.Context, addr string, handler http.Handler) error {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	errCh := make(chan error, 1)

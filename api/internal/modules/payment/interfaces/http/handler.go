@@ -83,6 +83,9 @@ func (h *Handler) handleRecordCashDeposit(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) handleImportPaymentsCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, httpx.MaxUploadBodyBytes)
+	}
 	entityID := strings.TrimSpace(r.URL.Query().Get("entity_id"))
 	if entityID == "" {
 		entityID = strings.TrimSpace(r.URL.Query().Get("legal_entity_id"))
@@ -106,7 +109,7 @@ func (h *Handler) handleImportPaymentsCSV(w http.ResponseWriter, r *http.Request
 			return
 		}
 		defer file.Close()
-		raw, err := io.ReadAll(file)
+		raw, err := io.ReadAll(io.LimitReader(file, httpx.MaxUploadBodyBytes))
 		if err != nil {
 			httpx.BadRequest(w, "failed to read uploaded file")
 			return
@@ -142,7 +145,7 @@ func (h *Handler) handleImportPaymentsCSV(w http.ResponseWriter, r *http.Request
 			return
 		}
 		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
+		raw, err := io.ReadAll(io.LimitReader(r.Body, httpx.MaxUploadBodyBytes))
 		if err != nil {
 			httpx.BadRequest(w, "failed to read request body")
 			return
@@ -199,6 +202,6 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, leasedomain.ErrRentCallNotFound):
 		httpx.NotFound(w, err.Error())
 	default:
-		httpx.InternalError(w, "internal payment error")
+		httpx.LogInternalError(w, "internal payment error", err)
 	}
 }

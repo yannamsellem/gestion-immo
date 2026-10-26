@@ -147,6 +147,6 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrShareholderNotFound):
 		httpx.NotFound(w, err.Error())
 	default:
-		httpx.InternalError(w, "internal portfolio error")
+		httpx.LogInternalError(w, "internal portfolio error", err)
 	}
 }
