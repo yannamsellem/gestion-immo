@@ -137,6 +137,51 @@ func TestResidentialRentCall_NoVATAndArchiveTenant(t *testing.T) {
 	}
 }
 
+func TestGenerateMonthlyRentCalls_RespectsLeaseStartAndEndDates(t *testing.T) {
+	svc := newTestLeaseService()
+	ctx := context.Background()
+
+	tenant, err := svc.CreateTenant(ctx, application.CreateTenantCmd{
+		FullName: "CLAIRE MARTIN",
+		Email:    "claire@example.fr",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.CreateLease(ctx, application.CreateLeaseCmd{
+		LegalEntityID: "ent_bounds",
+		LotID:         "lot_bounds",
+		TenantID:      tenant.ID,
+		LeaseType:     "RESIDENTIAL_UNFURNISHED",
+		RentNetCents:  money.AmountCents(700_00),
+		ChargesCents:  money.AmountCents(50_00),
+		StartDate:     "2026-03-01",
+		EndDate:       "2026-05-31",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Period before StartDate (2026-02 < 2026-03) -> 0 rent calls
+	beforeCalls, err := svc.GenerateMonthlyRentCalls(ctx, "ent_bounds", "2026-02")
+	if err != nil || len(beforeCalls) != 0 {
+		t.Fatalf("expected 0 rent calls before lease start_date, got %d (err=%v)", len(beforeCalls), err)
+	}
+
+	// Period within [StartDate, EndDate] (2026-04) -> 1 rent call
+	inBoundsCalls, err := svc.GenerateMonthlyRentCalls(ctx, "ent_bounds", "2026-04")
+	if err != nil || len(inBoundsCalls) != 1 {
+		t.Fatalf("expected 1 rent call within lease bounds, got %d (err=%v)", len(inBoundsCalls), err)
+	}
+
+	// Period after EndDate (2026-06 > 2026-05) -> 0 rent calls
+	afterCalls, err := svc.GenerateMonthlyRentCalls(ctx, "ent_bounds", "2026-06")
+	if err != nil || len(afterCalls) != 0 {
+		t.Fatalf("expected 0 rent calls after lease end_date, got %d (err=%v)", len(afterCalls), err)
+	}
+}
+
 func TestLeaseModule_HTTPAndMCPIntegration(t *testing.T) {
 	svc := newTestLeaseService()
 	handler := leasehttp.NewHandler(svc)

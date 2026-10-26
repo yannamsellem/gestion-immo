@@ -101,7 +101,7 @@ func isHeaderRow(cols []string) bool {
 	for _, c := range cols {
 		n := strings.ToLower(strings.TrimSpace(c))
 		switch n {
-		case "lease_id", "bail_id", "amount_cents", "amount", "montant", "label", "libelle", "date", "payment_date":
+		case "lease_id", "bail_id", "amount_cents", "montant_cents", "amount", "montant", "amount_eur", "label", "libelle", "date", "payment_date":
 			return true
 		}
 	}
@@ -142,7 +142,7 @@ func parseCSVRecord(rec []string, header map[string]int, hasHeader bool) (domain
 			}
 			amountCents = money.AmountCents(parsed)
 		} else if amtStr, ok := getCol("amount", "montant", "amount_eur"); ok && amtStr != "" {
-			parsed, err := parseAmountToCents(amtStr)
+			parsed, err := parseDecimalEURToCents(strings.TrimSpace(strings.TrimSuffix(strings.ReplaceAll(amtStr, " ", ""), "€")))
 			if err != nil {
 				return domain.BankTransactionRow{}, err
 			}
@@ -223,10 +223,11 @@ func (imp *CSVImporter) parseOFX(content string) ([]domain.BankTransactionRow, e
 }
 
 func parseAmountToCents(raw string) (money.AmountCents, error) {
+	hasEuroSymbol := strings.Contains(raw, "€")
 	cleaned := strings.ReplaceAll(strings.TrimSpace(raw), " ", "")
 	cleaned = strings.TrimSuffix(cleaned, "€")
 	cleaned = strings.TrimSpace(cleaned)
-	if strings.Contains(cleaned, ".") || strings.Contains(cleaned, ",") {
+	if hasEuroSymbol || strings.Contains(cleaned, ".") || strings.Contains(cleaned, ",") {
 		return parseDecimalEURToCents(cleaned)
 	}
 	val, err := strconv.ParseInt(cleaned, 10, 64)

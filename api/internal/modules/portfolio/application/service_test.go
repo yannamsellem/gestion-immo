@@ -154,6 +154,57 @@ func TestPortfolioHierarchySummaryAndValidation(t *testing.T) {
 	}
 }
 
+func TestUpsertShareholder_RejectsExceedingTotalShares(t *testing.T) {
+	svc := newTestPortfolioService()
+	ctx := context.Background()
+
+	ent, err := svc.CreateLegalEntity(ctx, application.CreateLegalEntityCmd{
+		Name:        "SCI CAP TEST",
+		EntityType:  "SCI_IR",
+		TotalShares: 100,
+	})
+	if err != nil {
+		t.Fatalf("create entity: %v", err)
+	}
+
+	// First shareholder gets 60 shares
+	if _, err := svc.UpsertShareholder(ctx, application.UpsertShareholderCmd{
+		LegalEntityID: ent.ID,
+		FullName:      "ASSOCIE 1",
+		SharesCount:   60,
+	}); err != nil {
+		t.Fatalf("upsert shareholder 1: %v", err)
+	}
+
+	// Second shareholder requesting 50 shares (60 + 50 = 110 > 100) must fail
+	if _, err := svc.UpsertShareholder(ctx, application.UpsertShareholderCmd{
+		LegalEntityID: ent.ID,
+		FullName:      "ASSOCIE 2",
+		SharesCount:   50,
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation when exceeding total_shares across shareholders, got %v", err)
+	}
+
+	// Updating first shareholder to 80 shares (0 + 80 <= 100) must succeed
+	updated, err := svc.UpsertShareholder(ctx, application.UpsertShareholderCmd{
+		LegalEntityID: ent.ID,
+		FullName:      "ASSOCIE 1",
+		SharesCount:   80,
+	})
+	if err != nil || updated.SharesCount != 80 {
+		t.Fatalf("expected updating existing shareholder to 80 shares to succeed, got %+v (err=%v)", updated, err)
+	}
+
+	// Second shareholder requesting 20 shares (80 + 20 == 100) must succeed
+	if _, err := svc.UpsertShareholder(ctx, application.UpsertShareholderCmd{
+		LegalEntityID: ent.ID,
+		FullName:      "ASSOCIE 2",
+		SharesCount:   20,
+	}); err != nil {
+		t.Fatalf("expected 20 shares to fit within remaining total_shares, got %v", err)
+	}
+}
+
 func TestPortfolioHTTPAndMCPInterfaces(t *testing.T) {
 	svc := newTestPortfolioService()
 	handler := portfoliohttp.NewHandler(svc)

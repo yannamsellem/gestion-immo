@@ -49,6 +49,7 @@ type CreateLeaseCmd struct {
 	GLIPolicyNumber      string            `json:"gli_policy_number"`
 	GuarantorName        string            `json:"guarantor_name"`
 	StartDate            string            `json:"start_date,omitempty"`
+	EndDate              string            `json:"end_date,omitempty"`
 }
 
 // LeaseDTO is an immutable projection of a domain.Lease.
@@ -223,13 +224,23 @@ func (s *Service) CreateLease(ctx context.Context, cmd CreateLeaseCmd) (LeaseDTO
 	}
 
 	now := time.Now().UTC()
-	startDate := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	startDate := time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
 	if strings.TrimSpace(cmd.StartDate) != "" {
 		parsed, err := time.Parse("2006-01-02", strings.TrimSpace(cmd.StartDate))
 		if err != nil {
 			return LeaseDTO{}, fmt.Errorf("%w: invalid start_date (expected YYYY-MM-DD): %v", domain.ErrValidation, err)
 		}
 		startDate = parsed.UTC()
+	}
+
+	var endDate *time.Time
+	if strings.TrimSpace(cmd.EndDate) != "" {
+		parsed, err := time.Parse("2006-01-02", strings.TrimSpace(cmd.EndDate))
+		if err != nil {
+			return LeaseDTO{}, fmt.Errorf("%w: invalid end_date (expected YYYY-MM-DD): %v", domain.ErrValidation, err)
+		}
+		endUTC := parsed.UTC()
+		endDate = &endUTC
 	}
 
 	id, err := generateID("lse")
@@ -252,6 +263,7 @@ func (s *Service) CreateLease(ctx context.Context, cmd CreateLeaseCmd) (LeaseDTO
 		GLIPolicyNumber:      strings.TrimSpace(cmd.GLIPolicyNumber),
 		GuarantorName:        strings.TrimSpace(cmd.GuarantorName),
 		StartDate:            startDate,
+		EndDate:              endDate,
 		Active:               true,
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -321,62 +333,80 @@ func (s *Service) GenerateMonthlyRentCalls(ctx context.Context, entityID string,
 		return nil, fmt.Errorf("%w: period_month must be in YYYY-MM format: %v", domain.ErrValidation, err)
 	}
 
-	leases, err := s.leaseRepo.ListLeasesByEntity(ctx, trimmedEntityID)
+	var result []RentCallDTO
+	err = s.uow.WithinTransaction(ctx, func(txCtx context.Context, repos domain.Repositories) error {
+		leases, err := repos.Leases.ListLeasesByEntity(txCtx, trimmedEntityID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		var toSave []domain.RentCall
+
+		for _, lease := range leases {
+			if !lease.Active {
+				continue
+			}
+			if !lease.StartDate.IsZero() {
+				startMonth := lease.StartDate.UTC().Format("2006-01")
+				if trimmedPeriod < startMonth {
+					continue
+				}
+			}
+			if lease.EndDate != nil && !lease.EndDate.IsZero() {
+				endMonth := lease.EndDate.UTC().Format("2006-01")
+				if trimmedPeriod > endMonth {
+					continue
+				}
+			}
+
+			existing, err := repos.RentCalls.FindRentCallByLeaseAndPeriod(txCtx, lease.ID, trimmedPeriod)
+			if err == nil && existing != nil {
+				result = append(result, toRentCallDTO(*existing))
+				continue
+			}
+			if err != nil && !errors.Is(err, domain.ErrRentCallNotFound) {
+				return err
+			}
+
+			id, err := generateID("rc")
+			if err != nil {
+				return err
+			}
+
+			vatCents, totalDueCents := lease.ComputeRentCallAmounts()
+			dueDate := computeDueDate(periodTime.Year(), periodTime.Month(), lease.DueDayOfMonth)
+
+			rc := domain.RentCall{
+				ID:                id,
+				LeaseID:           lease.ID,
+				LegalEntityID:     lease.LegalEntityID,
+				TenantID:          lease.TenantID,
+				PeriodMonth:       trimmedPeriod,
+				RentNetCents:      lease.RentNetCents,
+				VATCents:          vatCents,
+				ChargesCents:      lease.ChargesCents,
+				TotalDueCents:     totalDueCents,
+				RemainingDueCents: totalDueCents,
+				Status:            domain.StatusPending,
+				DueDate:           dueDate,
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			}
+
+			toSave = append(toSave, rc)
+			result = append(result, toRentCallDTO(rc))
+		}
+
+		if len(toSave) > 0 {
+			if err := repos.RentCalls.SaveRentCalls(txCtx, toSave); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	now := time.Now().UTC()
-	var toSave []domain.RentCall
-	var result []RentCallDTO
-
-	for _, lease := range leases {
-		if !lease.Active {
-			continue
-		}
-
-		existing, err := s.rentCallRepo.FindRentCallByLeaseAndPeriod(ctx, lease.ID, trimmedPeriod)
-		if err == nil && existing != nil {
-			result = append(result, toRentCallDTO(*existing))
-			continue
-		}
-		if err != nil && !errors.Is(err, domain.ErrRentCallNotFound) {
-			return nil, err
-		}
-
-		id, err := generateID("rc")
-		if err != nil {
-			return nil, err
-		}
-
-		vatCents, totalDueCents := lease.ComputeRentCallAmounts()
-		dueDate := computeDueDate(periodTime.Year(), periodTime.Month(), lease.DueDayOfMonth)
-
-		rc := domain.RentCall{
-			ID:                id,
-			LeaseID:           lease.ID,
-			LegalEntityID:     lease.LegalEntityID,
-			TenantID:          lease.TenantID,
-			PeriodMonth:       trimmedPeriod,
-			RentNetCents:      lease.RentNetCents,
-			VATCents:          vatCents,
-			ChargesCents:      lease.ChargesCents,
-			TotalDueCents:     totalDueCents,
-			RemainingDueCents: totalDueCents,
-			Status:            domain.StatusPending,
-			DueDate:           dueDate,
-			CreatedAt:         now,
-			UpdatedAt:         now,
-		}
-
-		toSave = append(toSave, rc)
-		result = append(result, toRentCallDTO(rc))
-	}
-
-	if len(toSave) > 0 {
-		if err := s.rentCallRepo.SaveRentCalls(ctx, toSave); err != nil {
-			return nil, err
-		}
 	}
 
 	return result, nil

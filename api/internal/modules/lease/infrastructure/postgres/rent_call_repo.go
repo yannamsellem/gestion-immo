@@ -144,7 +144,7 @@ func (r *RentCallRepo) ListRentCallsByLease(ctx context.Context, leaseID string)
 
 // ListUnpaidRentCallsByLease lists all unpaid/partially paid rent calls for a lease ordered oldest first.
 func (r *RentCallRepo) ListUnpaidRentCallsByLease(ctx context.Context, leaseID string) ([]domain.RentCall, error) {
-	const query = `
+	query := `
 		SELECT id, lease_id, legal_entity_id, tenant_id, period_month,
 		       rent_net_cents, vat_cents, charges_cents, total_due_cents, remaining_due_cents,
 		       status, due_date, created_at, updated_at
@@ -152,6 +152,9 @@ func (r *RentCallRepo) ListUnpaidRentCallsByLease(ctx context.Context, leaseID s
 		WHERE lease_id = $1 AND remaining_due_cents > 0 AND status <> 'PAID'
 		ORDER BY due_date ASC, period_month ASC
 	`
+	if postgres.TxFromContext(ctx) != nil {
+		query += " FOR UPDATE"
+	}
 	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, leaseID)
 	if err != nil {
 		return nil, fmt.Errorf("lease/postgres/rent_call_repo: list unpaid rent calls by lease: %w", err)

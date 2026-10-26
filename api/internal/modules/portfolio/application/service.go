@@ -264,8 +264,29 @@ func (s *Service) UpsertShareholder(ctx context.Context, cmd UpsertShareholderCm
 		UpdatedAt:             now,
 	}
 
-	saved, err := s.shareholderRepo.UpsertShareholder(ctx, sh)
-	if err != nil {
+	var saved *domain.Shareholder
+	if err := s.uow.WithinTransaction(ctx, func(txCtx context.Context, repos domain.Repositories) error {
+		existingList, err := repos.Shareholders.ListShareholdersByEntity(txCtx, entity.ID)
+		if err != nil {
+			return err
+		}
+		var otherSharesSum int64
+		for _, existing := range existingList {
+			if existing.FullName != fullName {
+				otherSharesSum += existing.SharesCount
+			}
+		}
+		if otherSharesSum+cmd.SharesCount > entity.TotalShares {
+			return fmt.Errorf("%w: total shares across shareholders (%d) would exceed entity total_shares (%d)", domain.ErrValidation, otherSharesSum+cmd.SharesCount, entity.TotalShares)
+		}
+
+		res, err := repos.Shareholders.UpsertShareholder(txCtx, sh)
+		if err != nil {
+			return err
+		}
+		saved = res
+		return nil
+	}); err != nil {
 		return ShareholderDTO{}, err
 	}
 

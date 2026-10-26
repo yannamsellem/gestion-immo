@@ -28,6 +28,12 @@ func (r *RentCallRepo) SaveRentCalls(_ context.Context, calls []domain.RentCall)
 	defer r.mu.Unlock()
 
 	for _, rc := range calls {
+		for _, existingID := range r.rcOrder {
+			existing := r.rentCalls[existingID]
+			if existing.ID != rc.ID && existing.LeaseID == rc.LeaseID && existing.PeriodMonth == rc.PeriodMonth {
+				return domain.ErrDuplicatePeriod
+			}
+		}
 		if _, exists := r.rentCalls[rc.ID]; !exists {
 			r.rcOrder = append(r.rcOrder, rc.ID)
 		}

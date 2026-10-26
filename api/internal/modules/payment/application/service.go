@@ -475,18 +475,21 @@ func (s *Service) processBankRows(
 		return BatchImportResultDTO{}, err
 	}
 
+	leasesByID := make(map[string]leaseapp.LeaseDTO, len(leases))
 	tenantNamesByLease := make(map[string]string, len(leases))
 	for _, l := range leases {
+		leasesByID[l.ID] = l
 		if t, err := s.leaseSvc.GetTenantByID(ctx, l.TenantID); err == nil {
 			tenantNamesByLease[l.ID] = strings.ToLower(t.FullName)
 		}
 	}
 
-	var (
-		receipts      []PaymentReceiptDTO
-		totalImported money.AmountCents
-	)
+	type resolvedBankRow struct {
+		row   domain.BankTransactionRow
+		lease leaseapp.LeaseDTO
+	}
 
+	var resolvedRows []resolvedBankRow
 	for _, row := range rows {
 		if row.AmountCents <= 0 {
 			continue
@@ -504,20 +507,78 @@ func (s *Service) processBankRows(
 		if leaseID == "" {
 			return BatchImportResultDTO{}, fmt.Errorf("%w: could not resolve lease_id for bank transaction %q", domain.ErrValidation, row.Label)
 		}
-
-		dto, err := s.RecordBankPayment(ctx, RecordBankPaymentCmd{
-			LeaseID:     leaseID,
-			AmountCents: row.AmountCents,
-			Method:      string(domain.MethodBankTransfer),
-			Label:       row.Label,
-			ExternalRef: row.ExternalRef,
-			PaymentDate: row.PaymentDate.Format("2006-01-02"),
-		})
-		if err != nil {
-			return BatchImportResultDTO{}, err
+		lease, ok := leasesByID[leaseID]
+		if !ok {
+			loadedLease, err := s.leaseSvc.GetLeaseByID(ctx, leaseID)
+			if err != nil {
+				return BatchImportResultDTO{}, err
+			}
+			lease = loadedLease
+			leasesByID[leaseID] = lease
 		}
-		receipts = append(receipts, dto)
-		totalImported = totalImported.Add(row.AmountCents)
+		resolvedRows = append(resolvedRows, resolvedBankRow{
+			row:   row,
+			lease: lease,
+		})
+	}
+
+	var (
+		receipts      []PaymentReceiptDTO
+		totalImported money.AmountCents
+	)
+
+	err = s.uow.WithinTransaction(ctx, func(txCtx context.Context, repos domain.Repositories) error {
+		existingPayments, err := repos.Payments.ListPaymentsByEntity(txCtx, entityID)
+		if err != nil {
+			return err
+		}
+		seenRefs := make(map[string]bool, len(existingPayments))
+		for _, p := range existingPayments {
+			if ref := strings.TrimSpace(p.ExternalRef); ref != "" {
+				seenRefs[ref] = true
+			}
+		}
+
+		for _, item := range resolvedRows {
+			row := item.row
+			extRef := strings.TrimSpace(row.ExternalRef)
+			if extRef != "" {
+				if seenRefs[extRef] {
+					continue
+				}
+				seenRefs[extRef] = true
+			}
+
+			label := strings.TrimSpace(row.Label)
+			if label == "" {
+				label = "Virement loyer"
+			}
+			paymentDate := row.PaymentDate.UTC()
+			if paymentDate.IsZero() {
+				paymentDate = time.Now().UTC()
+			}
+
+			dto, err := s.allocateAndPersistPayment(
+				txCtx,
+				repos.Payments,
+				item.lease,
+				row.AmountCents,
+				domain.MethodBankTransfer,
+				label,
+				extRef,
+				"",
+				paymentDate,
+			)
+			if err != nil {
+				return err
+			}
+			receipts = append(receipts, dto)
+			totalImported = totalImported.Add(row.AmountCents)
+		}
+		return nil
+	})
+	if err != nil {
+		return BatchImportResultDTO{}, err
 	}
 
 	if receipts == nil {

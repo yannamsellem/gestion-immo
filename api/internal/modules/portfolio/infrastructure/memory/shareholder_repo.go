@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"strings"
 	"sync"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
@@ -28,7 +27,7 @@ func (r *ShareholderRepo) UpsertShareholder(_ context.Context, shareholder domai
 
 	list := r.shareholders[shareholder.LegalEntityID]
 	for i, existing := range list {
-		if strings.EqualFold(existing.FullName, shareholder.FullName) {
+		if existing.FullName == shareholder.FullName {
 			existing.SharesCount = shareholder.SharesCount
 			existing.DetentionBasisPoints = shareholder.DetentionBasisPoints
 			existing.CurrentAccountCents = shareholder.CurrentAccountCents
