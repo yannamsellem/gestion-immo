@@ -133,9 +133,9 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 	}
 
 	if _, err := svc.UpsertInspectionItems(ctx, exitInsp.ID, []application.InspectionItemInput{
-		{RoomName: "Séjour", ElementName: "Parquet", Condition: "POOR", Observation: "Brûlure et lames fendues"},
+		{RoomName: "Séjour", ElementName: "Parquet", Condition: "POOR", Observation: "Brûlure et lames fendues", PhotoR2Keys: []string{"edl/lease_t3_2025/parquet_1.jpg", "edl/lease_t3_2025/parquet_2.jpg"}},
 		{RoomName: "Cuisine", ElementName: "Plan de travail", Condition: "GOOD", Observation: "RAS"},
-		{RoomName: "Salle de bain", ElementName: "Robinetterie", Condition: "OUT_OF_SERVICE", Observation: "Mitigeur cassé"},
+		{RoomName: "Salle de bain", ElementName: "Robinetterie", Condition: "OUT_OF_SERVICE", Observation: "Mitigeur cassé", PhotoR2Keys: []string{"edl/lease_t3_2025/robinetterie_1.jpg"}},
 	}); err != nil {
 		t.Fatalf("upsert exit items: %v", err)
 	}
@@ -162,6 +162,11 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 	_ = rc.Close()
 	if !strings.HasPrefix(string(pdfBytes), "%PDF-1.4") {
 		t.Fatalf("expected valid PDF header in R2, got: %s", string(pdfBytes))
+	}
+	for _, expected := range []string{"Photos", "edl/lease_t3_2025/parquet_1.jpg, edl/lease_t3_2025/parquet_2.jpg", "edl/lease_t3_2025/robinetterie_1.jpg"} {
+		if !strings.Contains(string(pdfBytes), expected) {
+			t.Fatalf("expected rendered inspection report HTML/PDF to contain %q, got: %s", expected, string(pdfBytes))
+		}
 	}
 
 	// Verify HTTP endpoints & MCP tools for incidents and inspections

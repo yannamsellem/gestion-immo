@@ -100,4 +100,35 @@ func RegisterTools(reg *mcpserver.Registry, svc *application.Service) {
 			return svc.ListLeases(ctx)
 		},
 	)
+
+	reg.RegisterTool(
+		mcpserver.ToolDefinition{
+			Name:        "generate_monthly_rent_calls",
+			Description: "Generate monthly rent calls for all active leases belonging to a legal entity for a given period_month (YYYY-MM).",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"legal_entity_id", "period_month"},
+				"properties": map[string]any{
+					"legal_entity_id": map[string]any{"type": "string", "description": "Legal entity ID"},
+					"entity_id":       map[string]any{"type": "string", "description": "Alias for legal_entity_id"},
+					"period_month":    map[string]any{"type": "string", "description": "Billing period in YYYY-MM format (e.g. 2026-03)"},
+				},
+			},
+		},
+		func(ctx context.Context, args json.RawMessage) (any, error) {
+			var req struct {
+				LegalEntityID string `json:"legal_entity_id"`
+				EntityID      string `json:"entity_id"`
+				PeriodMonth   string `json:"period_month"`
+			}
+			if err := json.Unmarshal(args, &req); err != nil {
+				return nil, fmt.Errorf("invalid generate_monthly_rent_calls arguments: %w", err)
+			}
+			entityID := strings.TrimSpace(req.LegalEntityID)
+			if entityID == "" {
+				entityID = strings.TrimSpace(req.EntityID)
+			}
+			return svc.GenerateMonthlyRentCalls(ctx, entityID, req.PeriodMonth)
+		},
+	)
 }

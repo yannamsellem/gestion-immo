@@ -39,6 +39,18 @@ type JournalLineInput struct {
 	CurrencyCode               string            `json:"currency_code,omitempty"`
 }
 
+// RecordExpenseInvoiceCmd carries the input for recording a supplier expense invoice in the AC (Purchases) journal.
+type RecordExpenseInvoiceCmd struct {
+	LegalEntityID      string            `json:"legal_entity_id"`
+	SupplierName       string            `json:"supplier_name,omitempty"`
+	ExpenseAccountCode string            `json:"expense_account_code"`
+	Label              string            `json:"label,omitempty"`
+	InvoiceRef         string            `json:"invoice_ref,omitempty"`
+	InvoiceDate        string            `json:"invoice_date,omitempty"`
+	AmountHTCents      money.AmountCents `json:"amount_ht_cents"`
+	VATCents           money.AmountCents `json:"vat_cents,omitempty"`
+}
+
 // RecordJournalEntryCmd carries the input for recording a balanced double-entry PCG journal entry.
 type RecordJournalEntryCmd struct {
 	LegalEntityID  string             `json:"legal_entity_id"`
@@ -159,6 +171,271 @@ func NewService(
 func (s *Service) WithPortfolioPort(port PortfolioPort) *Service {
 	s.portfolioSvc = port
 	return s
+}
+
+// RecordRentCallEntry posts a balanced PCG VE (Ventes) journal entry for a generated rent call:
+// debiting 411000 (totalDueCents, sub-account tenantID) and crediting 706100 (when vatCents == 0)
+// or 706200 (when vatCents > 0) for rentNetCents, 708000 for chargesCents (if > 0), and 445710 for vatCents (if > 0).
+func (s *Service) RecordRentCallEntry(
+	ctx context.Context,
+	entityID, rentCallID, leaseID, tenantID, periodMonth string,
+	dueDate time.Time,
+	rentNetCents, vatCents, chargesCents, totalDueCents money.AmountCents,
+) error {
+	if totalDueCents <= 0 {
+		return nil
+	}
+
+	label := fmt.Sprintf("Appel de loyer %s (%s)", strings.TrimSpace(periodMonth), strings.TrimSpace(leaseID))
+	var dateStr string
+	var fiscalYear int
+	if !dueDate.IsZero() {
+		dateStr = dueDate.UTC().Format("2006-01-02")
+		fiscalYear = dueDate.UTC().Year()
+	}
+
+	lines := []JournalLineInput{
+		{
+			AccountCode:    "411000",
+			AccountLabel:   "CLIENTS LOCATAIRES",
+			SubAccountCode: strings.TrimSpace(tenantID),
+			Label:          label,
+			DebitCents:     totalDueCents,
+		},
+	}
+
+	if rentNetCents > 0 {
+		revCode := "706100"
+		revLabel := "LOCATIONS LOCAUX"
+		if vatCents > 0 {
+			revCode = "706200"
+			revLabel = "LOYERS COMMERCIAUX"
+		}
+		lines = append(lines, JournalLineInput{
+			AccountCode:  revCode,
+			AccountLabel: revLabel,
+			Label:        label,
+			CreditCents:  rentNetCents,
+		})
+	}
+
+	if chargesCents > 0 {
+		lines = append(lines, JournalLineInput{
+			AccountCode:  "708000",
+			AccountLabel: "PRODUITS DES ACTIVITES ANNEXES - CHARGES LOCATIVES",
+			Label:        label,
+			CreditCents:  chargesCents,
+		})
+	}
+
+	if vatCents > 0 {
+		lines = append(lines, JournalLineInput{
+			AccountCode:  "445710",
+			AccountLabel: "TVA COLLECTEE",
+			Label:        label,
+			CreditCents:  vatCents,
+		})
+	}
+
+	_, err := s.RecordJournalEntry(ctx, RecordJournalEntryCmd{
+		LegalEntityID:  entityID,
+		FiscalYear:     fiscalYear,
+		JournalCode:    "VE",
+		EntryDate:      dateStr,
+		DocumentRef:    strings.TrimSpace(rentCallID),
+		DocumentDate:   dateStr,
+		ValidationDate: dateStr,
+		Label:          label,
+		Lines:          lines,
+	})
+	return err
+}
+
+// RecordPaymentCollectionEntry posts a balanced PCG CA (530000 Caisse when method == "CASH")
+// or BQ (512000 Banque otherwise) journal entry debiting 530000/512000 and crediting 411000 (amountCents).
+func (s *Service) RecordPaymentCollectionEntry(
+	ctx context.Context,
+	entityID, paymentID, tenantID, method, label string,
+	paymentDate time.Time,
+	amountCents money.AmountCents,
+) error {
+	if amountCents <= 0 {
+		return nil
+	}
+
+	journalCode := "BQ"
+	treasuryCode := "512000"
+	treasuryLabel := "BANQUE"
+	if strings.EqualFold(strings.TrimSpace(method), "CASH") {
+		journalCode = "CA"
+		treasuryCode = "530000"
+		treasuryLabel = "CAISSE"
+	}
+
+	entryLabel := strings.TrimSpace(label)
+	if entryLabel == "" {
+		entryLabel = "Encaissement loyer"
+	}
+
+	var dateStr string
+	var fiscalYear int
+	if !paymentDate.IsZero() {
+		dateStr = paymentDate.UTC().Format("2006-01-02")
+		fiscalYear = paymentDate.UTC().Year()
+	}
+
+	_, err := s.RecordJournalEntry(ctx, RecordJournalEntryCmd{
+		LegalEntityID:  entityID,
+		FiscalYear:     fiscalYear,
+		JournalCode:    journalCode,
+		EntryDate:      dateStr,
+		DocumentRef:    strings.TrimSpace(paymentID),
+		DocumentDate:   dateStr,
+		ValidationDate: dateStr,
+		Label:          entryLabel,
+		Lines: []JournalLineInput{
+			{
+				AccountCode:  treasuryCode,
+				AccountLabel: treasuryLabel,
+				Label:        entryLabel,
+				DebitCents:   amountCents,
+			},
+			{
+				AccountCode:    "411000",
+				AccountLabel:   "CLIENTS LOCATAIRES",
+				SubAccountCode: strings.TrimSpace(tenantID),
+				Label:          entryLabel,
+				CreditCents:    amountCents,
+			},
+		},
+	})
+	return err
+}
+
+// RecordCashDepositEntry posts a balanced PCG OD entry debiting 512000 and crediting 530000 (via 580000 internal transfer).
+func (s *Service) RecordCashDepositEntry(
+	ctx context.Context,
+	entityID, depositID, label string,
+	depositDate time.Time,
+	amountCents money.AmountCents,
+) error {
+	if amountCents <= 0 {
+		return nil
+	}
+
+	entryLabel := strings.TrimSpace(label)
+	if entryLabel == "" {
+		entryLabel = "Remise d'espèces en banque"
+	}
+
+	var dateStr string
+	var fiscalYear int
+	if !depositDate.IsZero() {
+		dateStr = depositDate.UTC().Format("2006-01-02")
+		fiscalYear = depositDate.UTC().Year()
+	}
+
+	_, err := s.RecordJournalEntry(ctx, RecordJournalEntryCmd{
+		LegalEntityID:  entityID,
+		FiscalYear:     fiscalYear,
+		JournalCode:    "OD",
+		EntryDate:      dateStr,
+		DocumentRef:    strings.TrimSpace(depositID),
+		DocumentDate:   dateStr,
+		ValidationDate: dateStr,
+		Label:          entryLabel,
+		Lines: []JournalLineInput{
+			{
+				AccountCode:  "580000",
+				AccountLabel: "VIREMENTS INTERNES",
+				Label:        entryLabel,
+				DebitCents:   amountCents,
+			},
+			{
+				AccountCode:  "530000",
+				AccountLabel: "CAISSE",
+				Label:        entryLabel,
+				CreditCents:  amountCents,
+			},
+			{
+				AccountCode:  "512000",
+				AccountLabel: "BANQUE",
+				Label:        entryLabel,
+				DebitCents:   amountCents,
+			},
+			{
+				AccountCode:  "580000",
+				AccountLabel: "VIREMENTS INTERNES",
+				Label:        entryLabel,
+				CreditCents:  amountCents,
+			},
+		},
+	})
+	return err
+}
+
+// RecordExpenseInvoice posts a balanced PCG AC (Achats) journal entry debiting expense_account_code
+// and 445660 (when vat_cents > 0) and crediting 401000 (Fournisseurs).
+func (s *Service) RecordExpenseInvoice(ctx context.Context, cmd RecordExpenseInvoiceCmd) (JournalEntryDTO, error) {
+	entityID := strings.TrimSpace(cmd.LegalEntityID)
+	if entityID == "" {
+		return JournalEntryDTO{}, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	}
+	if cmd.AmountHTCents <= 0 || cmd.VATCents < 0 {
+		return JournalEntryDTO{}, fmt.Errorf("%w: amount_ht_cents must be positive and vat_cents non-negative", domain.ErrValidation)
+	}
+
+	expenseAcct := strings.TrimSpace(cmd.ExpenseAccountCode)
+	if expenseAcct == "" {
+		expenseAcct = "606400"
+	}
+
+	supplier := strings.TrimSpace(cmd.SupplierName)
+	label := strings.TrimSpace(cmd.Label)
+	if label == "" {
+		if supplier != "" {
+			label = "Facture " + supplier
+		} else {
+			label = "Facture fournisseur"
+		}
+	}
+
+	totalTTC := cmd.AmountHTCents.Add(cmd.VATCents)
+	lines := []JournalLineInput{
+		{
+			AccountCode:  expenseAcct,
+			AccountLabel: label,
+			Label:        label,
+			DebitCents:   cmd.AmountHTCents,
+		},
+	}
+	if cmd.VATCents > 0 {
+		lines = append(lines, JournalLineInput{
+			AccountCode:  "445660",
+			AccountLabel: "TVA DEDUCTIBLE SUR AUTRES BIENS ET SERVICES",
+			Label:        label,
+			DebitCents:   cmd.VATCents,
+		})
+	}
+	lines = append(lines, JournalLineInput{
+		AccountCode:     "401000",
+		AccountLabel:    "FOURNISSEURS",
+		SubAccountCode:  supplier,
+		SubAccountLabel: supplier,
+		Label:           label,
+		CreditCents:     totalTTC,
+	})
+
+	return s.RecordJournalEntry(ctx, RecordJournalEntryCmd{
+		LegalEntityID:  entityID,
+		JournalCode:    "AC",
+		EntryDate:      strings.TrimSpace(cmd.InvoiceDate),
+		DocumentRef:    strings.TrimSpace(cmd.InvoiceRef),
+		DocumentDate:   strings.TrimSpace(cmd.InvoiceDate),
+		ValidationDate: strings.TrimSpace(cmd.InvoiceDate),
+		Label:          label,
+		Lines:          lines,
+	})
 }
 
 // RecordJournalEntry validates and persists a balanced double-entry PCG journal entry

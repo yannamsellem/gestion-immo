@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	accountingapp "github.com/yannamsellem/gestion-immo/internal/modules/accounting/application"
+	accountinginfra "github.com/yannamsellem/gestion-immo/internal/modules/accounting/infrastructure"
+	accountingmemory "github.com/yannamsellem/gestion-immo/internal/modules/accounting/infrastructure/memory"
 	leaseapp "github.com/yannamsellem/gestion-immo/internal/modules/lease/application"
 	leasememory "github.com/yannamsellem/gestion-immo/internal/modules/lease/infrastructure/memory"
 	"github.com/yannamsellem/gestion-immo/internal/modules/payment/application"
@@ -295,14 +298,20 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 		t.Fatalf("expected 2 cash journal entries, got %d (err=%v)", len(journalEntries), err)
 	}
 
-	// 7. Verify all 3 MCP tools (record_cash_payment, record_bank_payment, list_negative_positions)
+	// 7. Verify all 5 MCP tools (record_cash_payment, record_bank_payment, list_negative_positions, import_payments_batch, record_cash_deposit)
 	reg := mcpserver.NewRegistry(func(_ context.Context, token string) (string, error) {
 		return "usr_1", nil
 	})
 	paymentmcp.RegisterTools(reg, paymentSvc)
 
 	tools := reg.Tools()
-	expectedTools := []string{"record_cash_payment", "record_bank_payment", "list_negative_positions"}
+	expectedTools := []string{
+		"record_cash_payment",
+		"record_bank_payment",
+		"list_negative_positions",
+		"import_payments_batch",
+		"record_cash_deposit",
+	}
 	if len(tools) != len(expectedTools) {
 		t.Fatalf("expected %d MCP tools, got %d", len(expectedTools), len(tools))
 	}
@@ -312,7 +321,7 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 		}
 	}
 
-	// Call list_negative_positions and record_bank_payment via MCP JSON-RPC
+	// Call list_negative_positions, record_bank_payment, import_payments_batch, and record_cash_deposit via MCP JSON-RPC
 	mcpListBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_negative_positions","arguments":{"legal_entity_id":"ent_http_1"}}}`
 	reqMCPList := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(mcpListBody))
 	reqMCPList.Header.Set("Authorization", "Bearer valid")
@@ -329,5 +338,114 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 	reg.ServeHTTP(recMCPPay, reqMCPPay)
 	if recMCPPay.Code != http.StatusOK {
 		t.Fatalf("unexpected MCP record_bank_payment response (%d): %s", recMCPPay.Code, recMCPPay.Body.String())
+	}
+
+	mcpImportBody := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"import_payments_batch","arguments":{"legal_entity_id":"ent_http_1","csv_content":"lease_id,amount_eur,label,payment_date,external_ref\n` + lse.ID + `,800,Loyer mai 2026,2026-05-05,REF-MAY-MCP\n"}}}`
+	reqMCPImport := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(mcpImportBody))
+	reqMCPImport.Header.Set("Authorization", "Bearer valid")
+	recMCPImport := httptest.NewRecorder()
+	reg.ServeHTTP(recMCPImport, reqMCPImport)
+	if recMCPImport.Code != http.StatusOK || !strings.Contains(recMCPImport.Body.String(), "REF-MAY-MCP") {
+		t.Fatalf("unexpected MCP import_payments_batch response (%d): %s", recMCPImport.Code, recMCPImport.Body.String())
+	}
+
+	mcpDepositBody := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"record_cash_deposit","arguments":{"legal_entity_id":"ent_http_1","amount_cents":50000,"label":"Remise MCP","entry_date":"2026-05-06"}}}`
+	reqMCPDeposit := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(mcpDepositBody))
+	reqMCPDeposit.Header.Set("Authorization", "Bearer valid")
+	recMCPDeposit := httptest.NewRecorder()
+	reg.ServeHTTP(recMCPDeposit, reqMCPDeposit)
+	if recMCPDeposit.Code != http.StatusOK || !strings.Contains(recMCPDeposit.Body.String(), "Remise MCP") {
+		t.Fatalf("unexpected MCP record_cash_deposit response (%d): %s", recMCPDeposit.Code, recMCPDeposit.Body.String())
+	}
+}
+
+func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
+	ctx := context.Background()
+	paymentSvc, leaseSvc := newTestPaymentSuite()
+
+	jeRepo := accountingmemory.NewJournalEntryRepo()
+	abRepo := accountingmemory.NewAccountBalanceRepo()
+	aarRepo := accountingmemory.NewAnnualAccountReportRepo()
+	accUoW := accountingmemory.NewUnitOfWork(jeRepo, abRepo, aarRepo)
+	accSvc := accountingapp.NewService(
+		jeRepo,
+		abRepo,
+		aarRepo,
+		accUoW,
+		nil,
+		nil,
+		accountinginfra.NewFECExporter(),
+		nil,
+	)
+
+	leaseSvc.WithAccountingRecorder(accSvc)
+	paymentSvc.WithAccountingRecorder(accSvc)
+
+	tenant, err := leaseSvc.CreateTenant(ctx, leaseapp.CreateTenantCmd{
+		FullName: "SARL PHARMACIE CENTRALE",
+		Email:    "contact@pharmacie.fr",
+	})
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	lse, err := leaseSvc.CreateLease(ctx, leaseapp.CreateLeaseCmd{
+		LegalEntityID:      "ent_auto_pcg",
+		LotID:              "lot_comm_1",
+		TenantID:           tenant.ID,
+		LeaseType:          "COMMERCIAL_3_6_9",
+		RentNetCents:       money.AmountCents(2000_00),
+		ChargesCents:       money.AmountCents(200_00),
+		SubjectToVAT:       true,
+		VATRateBasisPoints: 2000,
+		DueDayOfMonth:      5,
+		StartDate:          "2026-01-01",
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+
+	calls, err := leaseSvc.GenerateMonthlyRentCalls(ctx, "ent_auto_pcg", "2026-01")
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("generate monthly rent calls: len=%d err=%v", len(calls), err)
+	}
+
+	// Total TTC = 2000 + 400 (TVA) + 200 (Charges) = 2600_00
+	if _, err := paymentSvc.RecordBankPayment(ctx, application.RecordBankPaymentCmd{
+		LeaseID:     lse.ID,
+		AmountCents: money.AmountCents(2600_00),
+		Method:      "BANK_TRANSFER",
+		Label:       "Virement loyer janvier 2026",
+		PaymentDate: "2026-01-06",
+	}); err != nil {
+		t.Fatalf("record bank payment: %v", err)
+	}
+
+	if _, err := paymentSvc.RecordCashDepositToBank(ctx, application.RecordCashDepositCmd{
+		LegalEntityID: "ent_auto_pcg",
+		AmountCents:   money.AmountCents(500_00),
+		Label:         "Remise espèces janvier 2026",
+		EntryDate:     "2026-01-07",
+	}); err != nil {
+		t.Fatalf("record cash deposit: %v", err)
+	}
+
+	entries, err := accSvc.ListJournalEntries(ctx, "ent_auto_pcg", 2026)
+	if err != nil {
+		t.Fatalf("list journal entries: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 automatic journal entries (VE rent call, BQ payment, OD cash deposit), got %d: %+v", len(entries), entries)
+	}
+
+	fecBytes, err := accSvc.ExportEntityFEC(ctx, "ent_auto_pcg", 2026)
+	if err != nil {
+		t.Fatalf("export fec: %v", err)
+	}
+	fecStr := string(fecBytes)
+	for _, code := range []string{"411000", "706200", "708000", "445710", "512000", "530000", "580000"} {
+		if !strings.Contains(fecStr, code) {
+			t.Fatalf("expected FEC export to contain PCG account %s, got:\n%s", code, fecStr)
+		}
 	}
 }

@@ -3,6 +3,8 @@ package domain
 import (
 	"context"
 	"time"
+
+	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 )
 
 // InspectionType distinguishes move-in (MOVE_IN) from move-out (MOVE_OUT) property inspections.
@@ -84,21 +86,34 @@ type InspectionItem struct {
 	UpdatedAt    time.Time
 }
 
+// MeterReadings captures optional utility meter readings (water, electricity PDL, gas PCE) recorded during an inspection.
+type MeterReadings struct {
+	WaterM3        int64  `json:"water_m3,omitempty"`
+	ElectricityPDL string `json:"electricity_pdl,omitempty"`
+	ElectricityKWh int64  `json:"electricity_kwh,omitempty"`
+	GasPCE         string `json:"gas_pce,omitempty"`
+	GasM3          int64  `json:"gas_m3,omitempty"`
+}
+
 // Inspection represents the Aggregate Root for a structured Move-In (MOVE_IN) or Move-Out (MOVE_OUT)
 // property inspection along with its child InspectionItems.
 // EntryInspectionID is optional (*string): legacy leases that only have a scanned PDF entry inspection
 // can still create a standalone MOVE_OUT inspection with EntryInspectionID == nil.
 type Inspection struct {
-	ID                string
-	LeaseID           string
-	TemplateID        string
-	Type              InspectionType
-	EntryInspectionID *string
-	Items             []InspectionItem
-	ReportPDFR2Key    string
-	InspectionDate    time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                       string
+	LeaseID                  string
+	TemplateID               string
+	Type                     InspectionType
+	EntryInspectionID        *string
+	Items                    []InspectionItem
+	MeterReadings            MeterReadings
+	KeysHandedOverCount      int
+	KeysDescription          string
+	EstimatedRepairCostCents money.AmountCents
+	ReportPDFR2Key           string
+	InspectionDate           time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 // InspectionRepository defines the persistence contract for the Inspection aggregate root (including its InspectionItems).

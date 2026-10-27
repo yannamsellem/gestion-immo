@@ -91,12 +91,23 @@ type RentCallDTO struct {
 	UpdatedAt         time.Time             `json:"updated_at"`
 }
 
+// AccountingRecorder defines the optional port for posting automatic PCG journal entries when rent calls are generated.
+type AccountingRecorder interface {
+	RecordRentCallEntry(
+		ctx context.Context,
+		entityID, rentCallID, leaseID, tenantID, periodMonth string,
+		dueDate time.Time,
+		rentNetCents, vatCents, chargesCents, totalDueCents money.AmountCents,
+	) error
+}
+
 // Service orchestrates tenants, leases, and monthly rent calls.
 type Service struct {
-	tenantRepo   domain.TenantRepository
-	leaseRepo    domain.LeaseRepository
-	rentCallRepo domain.RentCallRepository
-	uow          domain.UnitOfWork
+	tenantRepo         domain.TenantRepository
+	leaseRepo          domain.LeaseRepository
+	rentCallRepo       domain.RentCallRepository
+	uow                domain.UnitOfWork
+	accountingRecorder AccountingRecorder
 }
 
 // NewService constructs a lease application Service via constructor injection of per-aggregate repositories and UnitOfWork.
@@ -112,6 +123,12 @@ func NewService(
 		rentCallRepo: rentCallRepo,
 		uow:          uow,
 	}
+}
+
+// WithAccountingRecorder attaches an optional AccountingRecorder to automatically post PCG VE journal entries on rent call generation.
+func (s *Service) WithAccountingRecorder(recorder AccountingRecorder) *Service {
+	s.accountingRecorder = recorder
+	return s
 }
 
 // CreateTenant validates and persists a new Tenant.
@@ -332,7 +349,10 @@ func (s *Service) GenerateMonthlyRentCalls(ctx context.Context, entityID string,
 		return nil, fmt.Errorf("%w: period_month must be in YYYY-MM format: %v", domain.ErrValidation, err)
 	}
 
-	var result []RentCallDTO
+	var (
+		result []RentCallDTO
+		toSave []domain.RentCall
+	)
 	err = s.uow.WithinTransaction(ctx, func(txCtx context.Context, repos domain.Repositories) error {
 		leases, err := repos.Leases.ListLeasesByEntity(txCtx, trimmedEntityID)
 		if err != nil {
@@ -340,7 +360,6 @@ func (s *Service) GenerateMonthlyRentCalls(ctx context.Context, entityID string,
 		}
 
 		now := time.Now().UTC()
-		var toSave []domain.RentCall
 
 		for _, lease := range leases {
 			if !lease.Active {
@@ -406,6 +425,26 @@ func (s *Service) GenerateMonthlyRentCalls(ctx context.Context, entityID string,
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if s.accountingRecorder != nil {
+		for _, rc := range toSave {
+			if err := s.accountingRecorder.RecordRentCallEntry(
+				ctx,
+				rc.LegalEntityID,
+				rc.ID,
+				rc.LeaseID,
+				rc.TenantID,
+				rc.PeriodMonth,
+				rc.DueDate,
+				rc.RentNetCents,
+				rc.VATCents,
+				rc.ChargesCents,
+				rc.TotalDueCents,
+			); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return result, nil

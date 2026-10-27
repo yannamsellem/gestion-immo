@@ -34,11 +34,15 @@ type InspectionTemplateDTO struct {
 
 // CreateInspectionCmd carries the input for starting a Move-In (ENTRANT) or Move-Out (SORTANT) inspection.
 type CreateInspectionCmd struct {
-	LeaseID           string  `json:"lease_id"`
-	TemplateID        string  `json:"template_id"`
-	Type              string  `json:"type"`
-	EntryInspectionID *string `json:"entry_inspection_id,omitempty"`
-	InspectionDate    string  `json:"inspection_date,omitempty"`
+	LeaseID                  string               `json:"lease_id"`
+	TemplateID               string               `json:"template_id"`
+	Type                     string               `json:"type"`
+	EntryInspectionID        *string              `json:"entry_inspection_id,omitempty"`
+	InspectionDate           string               `json:"inspection_date,omitempty"`
+	MeterReadings            domain.MeterReadings `json:"meter_readings,omitempty"`
+	KeysHandedOverCount      int                  `json:"keys_handed_over_count,omitempty"`
+	KeysDescription          string               `json:"keys_description,omitempty"`
+	EstimatedRepairCostCents money.AmountCents    `json:"estimated_repair_cost_cents,omitempty"`
 }
 
 // InspectionItemInput carries a single room element's condition rating, observation, and R2 photo keys.
@@ -63,17 +67,21 @@ type InspectionItemDTO struct {
 
 // InspectionDTO is an immutable projection of a domain.Inspection with its items.
 type InspectionDTO struct {
-	ID                string                `json:"id"`
-	LeaseID           string                `json:"lease_id"`
-	TemplateID        string                `json:"template_id"`
-	Type              domain.InspectionType `json:"type"`
-	EntryInspectionID *string               `json:"entry_inspection_id,omitempty"`
-	Items             []InspectionItemDTO   `json:"items"`
-	ReportPDFR2Key    string                `json:"report_pdf_r2_key,omitempty"`
-	ReportDownloadURL string                `json:"report_download_url,omitempty"`
-	InspectionDate    string                `json:"inspection_date"`
-	CreatedAt         time.Time             `json:"created_at"`
-	UpdatedAt         time.Time             `json:"updated_at"`
+	ID                       string                `json:"id"`
+	LeaseID                  string                `json:"lease_id"`
+	TemplateID               string                `json:"template_id"`
+	Type                     domain.InspectionType `json:"type"`
+	EntryInspectionID        *string               `json:"entry_inspection_id,omitempty"`
+	Items                    []InspectionItemDTO   `json:"items"`
+	MeterReadings            domain.MeterReadings  `json:"meter_readings,omitempty"`
+	KeysHandedOverCount      int                   `json:"keys_handed_over_count,omitempty"`
+	KeysDescription          string                `json:"keys_description,omitempty"`
+	EstimatedRepairCostCents money.AmountCents     `json:"estimated_repair_cost_cents,omitempty"`
+	ReportPDFR2Key           string                `json:"report_pdf_r2_key,omitempty"`
+	ReportDownloadURL        string                `json:"report_download_url,omitempty"`
+	InspectionDate           string                `json:"inspection_date"`
+	CreatedAt                time.Time             `json:"created_at"`
+	UpdatedAt                time.Time             `json:"updated_at"`
 }
 
 // ElementComparisonDTO represents the comparison of a single room element between entry and exit inspections.
@@ -294,15 +302,19 @@ func (s *Service) CreateInspection(ctx context.Context, cmd CreateInspectionCmd)
 
 	now := time.Now().UTC()
 	insp := domain.Inspection{
-		ID:                inspID,
-		LeaseID:           leaseID,
-		TemplateID:        templateID,
-		Type:              inspType,
-		EntryInspectionID: entryIDPtr,
-		Items:             []domain.InspectionItem{},
-		InspectionDate:    inspDate,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:                       inspID,
+		LeaseID:                  leaseID,
+		TemplateID:               templateID,
+		Type:                     inspType,
+		EntryInspectionID:        entryIDPtr,
+		Items:                    []domain.InspectionItem{},
+		MeterReadings:            cmd.MeterReadings,
+		KeysHandedOverCount:      cmd.KeysHandedOverCount,
+		KeysDescription:          strings.TrimSpace(cmd.KeysDescription),
+		EstimatedRepairCostCents: cmd.EstimatedRepairCostCents,
+		InspectionDate:           inspDate,
+		CreatedAt:                now,
+		UpdatedAt:                now,
 	}
 
 	if err := s.inspections.SaveInspection(ctx, insp); err != nil {
@@ -653,17 +665,21 @@ func (s *Service) toInspectionDTO(ctx context.Context, insp domain.Inspection) I
 		downloadURL, _ = s.storage.PresignGetURL(ctx, insp.ReportPDFR2Key, 24*time.Hour)
 	}
 	return InspectionDTO{
-		ID:                insp.ID,
-		LeaseID:           insp.LeaseID,
-		TemplateID:        insp.TemplateID,
-		Type:              insp.Type,
-		EntryInspectionID: copyStringPtr(insp.EntryInspectionID),
-		Items:             toItemDTOs(insp.Items),
-		ReportPDFR2Key:    insp.ReportPDFR2Key,
-		ReportDownloadURL: downloadURL,
-		InspectionDate:    insp.InspectionDate.Format("2006-01-02"),
-		CreatedAt:         insp.CreatedAt,
-		UpdatedAt:         insp.UpdatedAt,
+		ID:                       insp.ID,
+		LeaseID:                  insp.LeaseID,
+		TemplateID:               insp.TemplateID,
+		Type:                     insp.Type,
+		EntryInspectionID:        copyStringPtr(insp.EntryInspectionID),
+		Items:                    toItemDTOs(insp.Items),
+		MeterReadings:            insp.MeterReadings,
+		KeysHandedOverCount:      insp.KeysHandedOverCount,
+		KeysDescription:          insp.KeysDescription,
+		EstimatedRepairCostCents: insp.EstimatedRepairCostCents,
+		ReportPDFR2Key:           insp.ReportPDFR2Key,
+		ReportDownloadURL:        downloadURL,
+		InspectionDate:           insp.InspectionDate.Format("2006-01-02"),
+		CreatedAt:                insp.CreatedAt,
+		UpdatedAt:                insp.UpdatedAt,
 	}
 }
 
@@ -770,16 +786,47 @@ func buildInspectionReportHTML(
 		insp.InspectionDate.Format("2006-01-02"),
 	))
 
-	sb.WriteString("<h2>Relevé par Pièce et Élément</h2><table><thead><tr><th>Pièce</th><th>Élément</th><th>État</th><th>Observation</th></tr></thead><tbody>")
+	sb.WriteString("<h2>Relevé par Pièce et Élément</h2><table><thead><tr><th>Pièce</th><th>Élément</th><th>État</th><th>Observation</th><th>Photos</th></tr></thead><tbody>")
 	for _, it := range insp.Items {
-		sb.WriteString(fmt.Sprintf("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+		photoCell := "0"
+		if len(it.PhotoR2Keys) > 0 {
+			photoCell = fmt.Sprintf("%d (%s)", len(it.PhotoR2Keys), html.EscapeString(strings.Join(it.PhotoR2Keys, ", ")))
+		}
+		sb.WriteString(fmt.Sprintf("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
 			html.EscapeString(it.RoomName),
 			html.EscapeString(it.ElementName),
 			html.EscapeString(translateConditionFr(it.Condition)),
 			html.EscapeString(it.Observation),
+			photoCell,
 		))
 	}
 	sb.WriteString("</tbody></table>")
+
+	if insp.MeterReadings != (domain.MeterReadings{}) {
+		sb.WriteString("<h2>Relevés de Compteurs</h2>")
+		sb.WriteString(fmt.Sprintf("<p>Eau : %d m³ | Électricité (PDL %s) : %d kWh | Gaz (PCE %s) : %d m³</p>",
+			insp.MeterReadings.WaterM3,
+			html.EscapeString(insp.MeterReadings.ElectricityPDL),
+			insp.MeterReadings.ElectricityKWh,
+			html.EscapeString(insp.MeterReadings.GasPCE),
+			insp.MeterReadings.GasM3,
+		))
+	}
+
+	if insp.KeysHandedOverCount > 0 || strings.TrimSpace(insp.KeysDescription) != "" {
+		sb.WriteString("<h2>Remise des Clés</h2>")
+		sb.WriteString(fmt.Sprintf("<p>Nombre : %d — %s</p>",
+			insp.KeysHandedOverCount,
+			html.EscapeString(insp.KeysDescription),
+		))
+	}
+
+	if insp.EstimatedRepairCostCents > 0 {
+		sb.WriteString("<h2>Retenues pour Réparations Locatives</h2>")
+		sb.WriteString(fmt.Sprintf("<p>Montant estimé : %s</p>",
+			html.EscapeString(insp.EstimatedRepairCostCents.FormatEUR()),
+		))
+	}
 
 	if hasComparison {
 		sb.WriteString(fmt.Sprintf("<h2>Comparatif Entrée / Sortie (%d dégradation(s) constatée(s))</h2>", len(degradations)))

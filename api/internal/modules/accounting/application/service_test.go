@@ -384,7 +384,7 @@ func TestAccountingHTTPAndMCPInterfaces(t *testing.T) {
 		t.Fatalf("expected 200 OK with FEC header on GET fec, got %d: %s", recFEC.Code, recFEC.Body.String())
 	}
 
-	// 7. Verify all 3 MCP tools (`preview_financial_statement`, `generate_annual_accounts_pdf`, `export_fec`)
+	// 7. Verify all 6 MCP tools (`record_journal_entry`, `record_expense_invoice`, `get_trial_balance`, `preview_financial_statement`, `generate_annual_accounts_pdf`, `export_fec`)
 	reg := mcpserver.NewRegistry(func(_ context.Context, token string) (string, error) {
 		if token == "valid" {
 			return "usr_1", nil
@@ -395,6 +395,9 @@ func TestAccountingHTTPAndMCPInterfaces(t *testing.T) {
 
 	tools := reg.Tools()
 	expectedTools := []string{
+		"record_journal_entry",
+		"record_expense_invoice",
+		"get_trial_balance",
 		"preview_financial_statement",
 		"generate_annual_accounts_pdf",
 		"export_fec",
@@ -413,6 +416,21 @@ func TestAccountingHTTPAndMCPInterfaces(t *testing.T) {
 		argsJSON string
 		expect   string
 	}{
+		{
+			toolName: "record_journal_entry",
+			argsJSON: `{"legal_entity_id":"` + ent.ID + `","fiscal_year":2025,"journal_code":"OD","entry_date":"2025-03-01","label":"Ecriture OD MCP","lines":[{"account_code":"512000","debit_cents":50000},{"account_code":"706100","credit_cents":50000}]}`,
+			expect:   "Ecriture OD MCP",
+		},
+		{
+			toolName: "record_expense_invoice",
+			argsJSON: `{"legal_entity_id":"` + ent.ID + `","supplier_name":"PLOMBERIE EXPRESS","expense_account_code":"615200","label":"Reparation fuite","invoice_ref":"FAC-2025-42","invoice_date":"2025-03-10","amount_ht_cents":100000,"vat_cents":20000}`,
+			expect:   "445660",
+		},
+		{
+			toolName: "get_trial_balance",
+			argsJSON: `{"legal_entity_id":"` + ent.ID + `","fiscal_year":2025}`,
+			expect:   "total_operating_revenue_n_cents",
+		},
 		{
 			toolName: "preview_financial_statement",
 			argsJSON: `{"legal_entity_id":"` + ent.ID + `","fiscal_year":2025}`,

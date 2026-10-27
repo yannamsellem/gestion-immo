@@ -107,15 +107,32 @@ type NegativePositionDTO struct {
 	GLIEligible      bool              `json:"gli_eligible"`
 }
 
+// AccountingRecorder defines the optional port for posting automatic PCG journal entries on payments and cash deposits.
+type AccountingRecorder interface {
+	RecordPaymentCollectionEntry(
+		ctx context.Context,
+		entityID, paymentID, tenantID, method, label string,
+		paymentDate time.Time,
+		amountCents money.AmountCents,
+	) error
+	RecordCashDepositEntry(
+		ctx context.Context,
+		entityID, depositID, label string,
+		depositDate time.Time,
+		amountCents money.AmountCents,
+	) error
+}
+
 // Service orchestrates cash/bank payment allocation, PCG 530 Cash Journal, CSV/OFX batch imports, and negative positions.
 type Service struct {
-	payments     domain.PaymentRepository
-	cashJournal  domain.CashJournalRepository
-	uow          domain.UnitOfWork
-	leaseSvc     LeasePort
-	allocSvc     *domain.AllocationService
-	csvImporter  domain.StatementImporter
-	bankProvider domain.BankProvider
+	payments           domain.PaymentRepository
+	cashJournal        domain.CashJournalRepository
+	uow                domain.UnitOfWork
+	leaseSvc           LeasePort
+	allocSvc           *domain.AllocationService
+	csvImporter        domain.StatementImporter
+	bankProvider       domain.BankProvider
+	accountingRecorder AccountingRecorder
 }
 
 // NewService constructs a payment application Service via constructor injection.
@@ -136,6 +153,12 @@ func NewService(
 		csvImporter:  csvImporter,
 		bankProvider: bankProvider,
 	}
+}
+
+// WithAccountingRecorder attaches an optional AccountingRecorder to automatically post PCG journal entries on payments and cash deposits.
+func (s *Service) WithAccountingRecorder(recorder AccountingRecorder) *Service {
+	s.accountingRecorder = recorder
+	return s
 }
 
 // RecordCashPayment records a physical cash rent payment, allocates it across unpaid rent calls
@@ -221,6 +244,20 @@ func (s *Service) RecordCashPayment(ctx context.Context, cmd RecordCashPaymentCm
 	if err != nil {
 		return PaymentReceiptDTO{}, err
 	}
+	if s.accountingRecorder != nil {
+		if err := s.accountingRecorder.RecordPaymentCollectionEntry(
+			ctx,
+			result.LegalEntityID,
+			result.ID,
+			result.TenantID,
+			string(result.Method),
+			result.Label,
+			result.PaymentDate,
+			result.AmountCents,
+		); err != nil {
+			return PaymentReceiptDTO{}, err
+		}
+	}
 	return result, nil
 }
 
@@ -281,6 +318,20 @@ func (s *Service) RecordBankPayment(ctx context.Context, cmd RecordBankPaymentCm
 	if err != nil {
 		return PaymentReceiptDTO{}, err
 	}
+	if s.accountingRecorder != nil {
+		if err := s.accountingRecorder.RecordPaymentCollectionEntry(
+			ctx,
+			result.LegalEntityID,
+			result.ID,
+			result.TenantID,
+			string(result.Method),
+			result.Label,
+			result.PaymentDate,
+			result.AmountCents,
+		); err != nil {
+			return PaymentReceiptDTO{}, err
+		}
+	}
 	return result, nil
 }
 
@@ -323,6 +374,18 @@ func (s *Service) RecordCashDepositToBank(ctx context.Context, cmd RecordCashDep
 	}
 	if err := s.cashJournal.SaveCashJournalEntry(ctx, entry); err != nil {
 		return CashJournalEntryDTO{}, err
+	}
+	if s.accountingRecorder != nil {
+		if err := s.accountingRecorder.RecordCashDepositEntry(
+			ctx,
+			entry.LegalEntityID,
+			entry.ID,
+			entry.Label,
+			entry.EntryDate,
+			entry.CreditCents,
+		); err != nil {
+			return CashJournalEntryDTO{}, err
+		}
 	}
 	return toCashJournalEntryDTO(entry), nil
 }
@@ -578,6 +641,23 @@ func (s *Service) processBankRows(
 	})
 	if err != nil {
 		return BatchImportResultDTO{}, err
+	}
+
+	if s.accountingRecorder != nil {
+		for _, receipt := range receipts {
+			if err := s.accountingRecorder.RecordPaymentCollectionEntry(
+				ctx,
+				receipt.LegalEntityID,
+				receipt.ID,
+				receipt.TenantID,
+				string(receipt.Method),
+				receipt.Label,
+				receipt.PaymentDate,
+				receipt.AmountCents,
+			); err != nil {
+				return BatchImportResultDTO{}, err
+			}
+		}
 	}
 
 	if receipts == nil {

@@ -240,10 +240,10 @@ func TestLeaseModule_HTTPAndMCPIntegration(t *testing.T) {
 		t.Fatalf("expected 2550_00 TTC, got %d", generated[0].TotalDueCents)
 	}
 
-	// 4. Verify MCP tools list and execute create_tenant, create_lease, list_leases
+	// 4. Verify MCP tools list and execute create_tenant, create_lease, list_leases, generate_monthly_rent_calls
 	tools := reg.Tools()
-	if len(tools) != 3 {
-		t.Fatalf("expected 3 MCP tools registered, got %d", len(tools))
+	if len(tools) != 4 {
+		t.Fatalf("expected 4 MCP tools registered, got %d", len(tools))
 	}
 
 	callMCPTool := func(id int, name string, args map[string]any) *httptest.ResponseRecorder {
@@ -288,5 +288,13 @@ func TestLeaseModule_HTTPAndMCPIntegration(t *testing.T) {
 	})
 	if recMCPList.Code != http.StatusOK || !bytes.Contains(recMCPList.Body.Bytes(), []byte("lot_99")) || !bytes.Contains(recMCPList.Body.Bytes(), []byte("lot_100")) {
 		t.Fatalf("list_leases MCP failed (%d): %s", recMCPList.Code, recMCPList.Body.String())
+	}
+
+	recMCPRentCalls := callMCPTool(4, "generate_monthly_rent_calls", map[string]any{
+		"legal_entity_id": "ent_99",
+		"period_month":    "2026-04",
+	})
+	if recMCPRentCalls.Code != http.StatusOK || !bytes.Contains(recMCPRentCalls.Body.Bytes(), []byte("2026-04")) {
+		t.Fatalf("generate_monthly_rent_calls MCP failed (%d): %s", recMCPRentCalls.Code, recMCPRentCalls.Body.String())
 	}
 }

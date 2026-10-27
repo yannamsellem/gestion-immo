@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -15,8 +16,17 @@ import (
 	"github.com/yannamsellem/gestion-immo/cmd/migrate"
 	"github.com/yannamsellem/gestion-immo/cmd/server"
 	"github.com/yannamsellem/gestion-immo/cmd/token"
+	"github.com/yannamsellem/gestion-immo/internal/modules/accounting"
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
+	"github.com/yannamsellem/gestion-immo/internal/modules/lease"
+	leaseapp "github.com/yannamsellem/gestion-immo/internal/modules/lease/application"
+	"github.com/yannamsellem/gestion-immo/internal/modules/payment"
+	paymentapp "github.com/yannamsellem/gestion-immo/internal/modules/payment/application"
+	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio"
 	"github.com/yannamsellem/gestion-immo/internal/platform/config"
+	"github.com/yannamsellem/gestion-immo/internal/platform/money"
+	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
+	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
 )
 
 func TestCLIApp_ExposesRequiredSubcommandsAndFlags(t *testing.T) {
@@ -122,5 +132,68 @@ func TestServerHTTPHandler_EnforcesJWTAuthOnBusinessRoutes(t *testing.T) {
 	handler.ServeHTTP(recEntities, reqEntities)
 	if recEntities.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthenticated GET /api/v1/entities to return 401 Unauthorized, got %d: %s", recEntities.Code, recEntities.Body.String())
+	}
+}
+
+func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
+	ctx := context.Background()
+	portfolioMod := portfolio.NewModule(nil)
+	leaseMod := lease.NewModule(nil)
+	paymentMod := payment.NewModule(nil, leaseMod.Service(), false)
+	accountingMod := accounting.NewModule(nil, r2.NewInMemoryStorage(), templating.NewInMemoryPdfEngine(), portfolioMod.Service())
+
+	leaseMod.Service().WithAccountingRecorder(accountingMod.Service())
+	paymentMod.Service().WithAccountingRecorder(accountingMod.Service())
+
+	tenant, err := leaseMod.Service().CreateTenant(ctx, leaseapp.CreateTenantCmd{
+		FullName: "DUPONT LOCATAIRE",
+		Email:    "dupont@example.fr",
+	})
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	lse, err := leaseMod.Service().CreateLease(ctx, leaseapp.CreateLeaseCmd{
+		LegalEntityID: "ent_main_auto",
+		LotID:         "lot_1",
+		TenantID:      tenant.ID,
+		LeaseType:     "RESIDENTIAL_UNFURNISHED",
+		RentNetCents:  money.AmountCents(900_00),
+		ChargesCents:  money.AmountCents(80_00),
+		DueDayOfMonth: 5,
+		StartDate:     "2026-01-01",
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+
+	calls, err := leaseMod.Service().GenerateMonthlyRentCalls(ctx, "ent_main_auto", "2026-01")
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("generate rent calls: len=%d err=%v", len(calls), err)
+	}
+
+	if _, err := paymentMod.Service().RecordCashPayment(ctx, paymentapp.RecordCashPaymentCmd{
+		LeaseID:     lse.ID,
+		AmountCents: money.AmountCents(980_00),
+		Label:       "Loyer janvier 2026 espèces",
+		PaymentDate: "2026-01-05",
+	}); err != nil {
+		t.Fatalf("record cash payment: %v", err)
+	}
+
+	entries, err := accountingMod.Service().ListJournalEntries(ctx, "ent_main_auto", 2026)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("expected 2 automatic journal entries (VE + CA), got %d (err=%v)", len(entries), err)
+	}
+
+	fecBytes, err := accountingMod.Service().ExportEntityFEC(ctx, "ent_main_auto", 2026)
+	if err != nil {
+		t.Fatalf("export fec: %v", err)
+	}
+	fecStr := string(fecBytes)
+	for _, code := range []string{"411000", "706100", "708000", "530000"} {
+		if !strings.Contains(fecStr, code) {
+			t.Fatalf("expected FEC export to contain %s, got:\n%s", code, fecStr)
+		}
 	}
 }
