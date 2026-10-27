@@ -1,3 +1,0 @@
-DROP TABLE IF EXISTS rent_calls;
-DROP TABLE IF EXISTS leases;
-DROP TABLE IF EXISTS tenants;

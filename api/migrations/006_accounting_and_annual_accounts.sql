@@ -84,3 +84,11 @@ CREATE TABLE IF NOT EXISTS annual_account_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_annual_account_reports_entity_year ON annual_account_reports(legal_entity_id, fiscal_year);
+
+---- create above / drop below ----
+
+DROP TABLE IF EXISTS annual_account_reports;
+DROP TABLE IF EXISTS account_balance_lines;
+DROP TABLE IF EXISTS journal_lines;
+DROP TABLE IF EXISTS journal_entries;
+DROP TABLE IF EXISTS pcg_accounts;

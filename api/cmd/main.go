@@ -8,7 +8,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/yannamsellem/gestion-immo/cmd/bootstrap"
-	"github.com/yannamsellem/gestion-immo/cmd/migrate"
 	"github.com/yannamsellem/gestion-immo/cmd/server"
 	"github.com/yannamsellem/gestion-immo/cmd/token"
 )
@@ -23,7 +22,6 @@ func main() {
 		Commands: []*cli.Command{
 			server.Command(),
 			bootstrap.Command(),
-			migrate.Command(),
 			token.Command(),
 		},
 	}

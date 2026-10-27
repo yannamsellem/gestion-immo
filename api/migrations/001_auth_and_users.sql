@@ -38,3 +38,9 @@ CREATE TABLE IF NOT EXISTS mcp_api_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_api_tokens_user_id ON mcp_api_tokens(user_id);
+
+---- create above / drop below ----
+
+DROP TABLE IF EXISTS mcp_api_tokens;
+DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS users;

@@ -47,3 +47,9 @@ CREATE TABLE IF NOT EXISTS cash_journal_entries (
 
 CREATE INDEX IF NOT EXISTS idx_cash_journal_legal_entity_id ON cash_journal_entries(legal_entity_id);
 CREATE INDEX IF NOT EXISTS idx_cash_journal_entry_date ON cash_journal_entries(entry_date);
+
+---- create above / drop below ----
+
+DROP TABLE IF EXISTS cash_journal_entries;
+DROP TABLE IF EXISTS rent_allocations;
+DROP TABLE IF EXISTS payments;

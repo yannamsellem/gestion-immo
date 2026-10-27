@@ -17,9 +17,9 @@
 - **Controlled Exposure**: Each `Module` struct wires its own repositories, domain/application services, and HTTP/MCP adapters internally, and exposes only required dependencies via explicit methods (e.g., `Service()`, `RegisterRoutes(...)`, `RegisterMCPTools(...)`).
 
 ## 4. CLI Architecture & Single Responsibility Principle (`api/cmd/`)
-- **One Package Per Command**: Every CLI subcommand lives in its own package under `api/cmd/<command>/<command>.go` and exports `func Command() *cli.Command`. `api/cmd/main.go` only assembles the root `cli.Command` with `server.Command()`, `bootstrap.Command()`, `migrate.Command()`, and `token.Command()`.
-- **Self-Contained Execution Units**: Each command must initialize **only** the dependencies it requires to run (e.g., `bootstrap` and `token` initialize only the `auth` module; `migrate` only runs database migrations; `server` initializes all modules).
-- **Strict SRP for Migrations**: Database migrations must never be triggered by the HTTP server (`server` must not have `--auto-migrate` or `--migrate-path` flags). Migrations are executed exclusively via the dedicated `migrate` command.
+- **One Package Per Command**: Every CLI subcommand lives in its own package under `api/cmd/<command>/<command>.go` and exports `func Command() *cli.Command`. `api/cmd/main.go` only assembles the root `cli.Command` with `server.Command()`, `bootstrap.Command()`, and `token.Command()`.
+- **Self-Contained Execution Units**: Each command must initialize **only** the dependencies it requires to run (e.g., `bootstrap` and `token` initialize only the `auth` module; `server` initializes all modules).
+- **Strict SRP for Migrations & Keys**: Database migrations (`jackc/tern`) and cryptographic key generation (`step crypto`) must never be embedded in the Go application binary. Migrations are executed exclusively via the `tern` CLI locally (`Makefile`) or via the dedicated `migrate` initContainer in Docker/Kubernetes.
 - **Graceful Shutdown**: Wrap the command context with `ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)` and `defer stop()` only in commands that manage long-running processes or interruptible I/O (such as `server`).
 
 ## 5. SOLID & Clean Code Principles

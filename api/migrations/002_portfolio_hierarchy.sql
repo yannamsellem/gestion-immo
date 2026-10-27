@@ -57,3 +57,10 @@ CREATE TABLE IF NOT EXISTS lots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_lots_property_id ON lots(property_id);
+
+---- create above / drop below ----
+
+DROP TABLE IF EXISTS lots;
+DROP TABLE IF EXISTS properties;
+DROP TABLE IF EXISTS shareholders;
+DROP TABLE IF EXISTS legal_entities;

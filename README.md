@@ -19,9 +19,9 @@ Multi-entity real estate portfolio, lease, property inspection, and accounting m
 
 ### Backend (`api/`)
 - **Language & Architecture**: Go 1.27 — Modular Monolith built around Clean Architecture and SOLID principles (`domain`, `application`, `infrastructure`, `interfaces`).
-- **Database**: PostgreSQL 16 (`jackc/pgx/v5`) with explicit SQL schema migrations (`golang-migrate`).
-- **CLI**: `urfave/cli/v3` with self-contained subcommands (`server`, `migrate`, `bootstrap`, `token`).
-- **Security & Authentication**: Argon2id password hashing, asymmetric Ed25519 JWTs (key rotation via `kid`), `SUPER_ADMIN` user approval workflow, and SHA-256 hashed MCP Bearer tokens.
+- **Database**: PostgreSQL 16 (`jackc/pgx/v5`) with transactional DDL schema migrations managed by **`jackc/tern`** (locally via CLI and in production via a dedicated `migrate` initContainer).
+- **CLI**: `urfave/cli/v3` with self-contained subcommands (`server`, `bootstrap`, `token`).
+- **Security & Authentication**: Argon2id password hashing, asymmetric Ed25519 JWTs (generated via **Smallstep `step`**), `SUPER_ADMIN` user approval workflow, and SHA-256 hashed MCP Bearer tokens.
 - **Document Engine & Object Storage**: `.docx` templating and HTML-to-PDF rendering powered by **Gotenberg 8**; S3-compatible object storage on **Cloudflare R2**.
 - **Monetary Precision**: Integer-only arithmetic in euro cents (`int64`) and basis points (`10000 = 100.00%`), with zero floating-point calculations.
 
@@ -32,7 +32,7 @@ Multi-entity real estate portfolio, lease, property inspection, and accounting m
 
 ### Infrastructure (`infra/terraform/`)
 - **IaC**: Terraform (Cloudflare provider) provisioning Cloudflare R2 buckets (application documents and encrypted daily PostgreSQL backups), Cloudflare Zero Trust Tunnel (`cloudflared`), DNS records, and the Cloudflare Pages project.
-- **Containerization**: Docker & Docker Compose (`postgres`, `gotenberg`, `gestion-immo`, `cloudflared`, `pg-backup`).
+- **Containerization**: Docker & Docker Compose (`postgres`, `migrate` initContainer, `gotenberg`, `gestion-immo`, `cloudflared`, `pg-backup`).
 
 ---
 
@@ -41,16 +41,22 @@ Multi-entity real estate portfolio, lease, property inspection, and accounting m
 ### 1. Prerequisites
 - **Go** `>= 1.27`
 - **Node.js** `>= 22` & **npm**
+- **Smallstep CLI** (`step`) for cryptographic key and JWKS generation
+- **Tern CLI** (`jackc/tern/v2`) for PostgreSQL schema migrations
 - **PostgreSQL** `16` & **Gotenberg** `8` (or **Docker Compose**)
 
-### 2. Database Migrations
-Database migrations run independently from the HTTP server via the dedicated `migrate` command:
+### 2. Cryptographic Keys & Database Migrations
+Generate the Ed25519 signing keypair and static JWKS using Smallstep, then apply SQL migrations via `tern`:
 
 ```bash
-# Apply pending SQL migrations
+# Generate Ed25519 private key and static JWKS JSON in api/keys/
+make -C api generate-keys
+
+# Apply pending SQL migrations (jackc/tern)
 make -C api migrate-up
 
-# Roll back the last migration
+# Check migration status or roll back the last migration
+make -C api migrate-status
 make -C api migrate-down
 ```
 

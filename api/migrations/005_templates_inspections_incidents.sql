@@ -101,3 +101,13 @@ CREATE TABLE IF NOT EXISTS incidents (
 CREATE INDEX IF NOT EXISTS idx_incidents_property_id ON incidents(property_id);
 CREATE INDEX IF NOT EXISTS idx_incidents_lease_id ON incidents(lease_id);
 CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
+
+---- create above / drop below ----
+
+DROP TABLE IF EXISTS incidents;
+DROP TABLE IF EXISTS inspection_items;
+DROP TABLE IF EXISTS inspections;
+DROP TABLE IF EXISTS inspection_templates;
+DROP TABLE IF EXISTS gli_dossiers;
+DROP TABLE IF EXISTS stored_files;
+DROP TABLE IF EXISTS document_templates;

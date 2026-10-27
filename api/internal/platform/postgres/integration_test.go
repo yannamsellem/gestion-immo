@@ -27,14 +27,10 @@ import (
 	"github.com/yannamsellem/gestion-immo/internal/platform/secret"
 )
 
-func TestPostgresIntegration_MigrationsTransactionsAndRepositories(t *testing.T) {
+func TestPostgresIntegration_TransactionsAndRepositories(t *testing.T) {
 	dbURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if dbURL == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
-	}
-
-	if err := postgres.RunMigrations(dbURL, "../../../migrations", "up"); err != nil {
-		t.Fatalf("RunMigrations up failed: %v", err)
 	}
 
 	ctx := context.Background()

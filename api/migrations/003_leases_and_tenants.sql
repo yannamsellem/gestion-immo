@@ -58,3 +58,9 @@ CREATE TABLE IF NOT EXISTS rent_calls (
 CREATE INDEX IF NOT EXISTS idx_rent_calls_legal_entity_id ON rent_calls(legal_entity_id);
 CREATE INDEX IF NOT EXISTS idx_rent_calls_lease_id ON rent_calls(lease_id);
 CREATE INDEX IF NOT EXISTS idx_rent_calls_status ON rent_calls(status);
+
+---- create above / drop below ----
+
+DROP TABLE IF EXISTS rent_calls;
+DROP TABLE IF EXISTS leases;
+DROP TABLE IF EXISTS tenants;

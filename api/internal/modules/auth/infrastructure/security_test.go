@@ -116,6 +116,22 @@ func TestJwtService_TokenAuthorityVolumeKeysAndKIDValidation(t *testing.T) {
 	if _, err := jwtSvc.ValidateAccessToken(otherTok.Value()); !errors.Is(err, domain.ErrInvalidToken) {
 		t.Fatalf("expected ErrInvalidToken on token with mismatched kid/authority, got %v", err)
 	}
+	// Also verify Smallstep generate-keys layout (only private.pem + jwks.json without public.pem)
+	stepDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stepDir, "private.pem"), privPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jwksJSON := `{"keys":[{"use":"sig","kty":"OKP","kid":"kid_step_jwks_2026","crv":"Ed25519","alg":"EdDSA"}]}`
+	if err := os.WriteFile(filepath.Join(stepDir, "jwks.json"), []byte(jwksJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stepAuth, err := domain.LoadTokenAuthorityFromDir(stepDir, "")
+	if err != nil {
+		t.Fatalf("LoadTokenAuthorityFromDir (Smallstep layout) failed: %v", err)
+	}
+	if stepAuth.KID() != "kid_step_jwks_2026" {
+		t.Fatalf("expected KID 'kid_step_jwks_2026' from jwks.json, got %q", stepAuth.KID())
+	}
 }
 
 func TestPasswordHasher_EnforcesMaxPasswordBytes(t *testing.T) {

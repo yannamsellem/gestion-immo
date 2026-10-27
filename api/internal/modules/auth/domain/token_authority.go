@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,6 +20,7 @@ import (
 const (
 	defaultPrivateKeyFile = "private.pem"
 	defaultPublicKeyFile  = "public.pem"
+	defaultJWKSFile       = "jwks.json"
 	defaultKIDFile        = "kid"
 )
 
@@ -68,7 +71,8 @@ func GenerateTokenAuthority(kid string) (*TokenAuthority, error) {
 	return NewTokenAuthority(kid, priv, pub)
 }
 
-// LoadTokenAuthorityFromPEM parses PKCS#8 private key PEM and PKIX public key PEM bytes into a TokenAuthority.
+// LoadTokenAuthorityFromPEM parses PKCS#8 private key PEM and optional PKIX public key PEM bytes into a TokenAuthority.
+// When publicKeyPEM is empty, the Ed25519 public key is derived directly from the private key.
 func LoadTokenAuthorityFromPEM(kid string, privateKeyPEM []byte, publicKeyPEM []byte) (*TokenAuthority, error) {
 	privBlock, _ := pem.Decode(privateKeyPEM)
 	if privBlock == nil {
@@ -81,6 +85,14 @@ func LoadTokenAuthorityFromPEM(kid string, privateKeyPEM []byte, publicKeyPEM []
 	edPriv, ok := parsedPriv.(ed25519.PrivateKey)
 	if !ok {
 		return nil, fmt.Errorf("%w: private key is not Ed25519", ErrValidation)
+	}
+
+	if len(bytes.TrimSpace(publicKeyPEM)) == 0 {
+		edPub, ok := edPriv.Public().(ed25519.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("%w: failed to derive Ed25519 public key", ErrValidation)
+		}
+		return NewTokenAuthority(kid, edPriv, edPub)
 	}
 
 	pubBlock, _ := pem.Decode(publicKeyPEM)
@@ -99,7 +111,7 @@ func LoadTokenAuthorityFromPEM(kid string, privateKeyPEM []byte, publicKeyPEM []
 	return NewTokenAuthority(kid, edPriv, edPub)
 }
 
-// LoadTokenAuthorityFromDir reads private.pem, public.pem, and optional kid file from a mounted read-only volume directory.
+// LoadTokenAuthorityFromDir reads private.pem (and optional public.pem, kid, or jwks.json) from a mounted volume directory.
 func LoadTokenAuthorityFromDir(keysDir string, kidOverride string) (*TokenAuthority, error) {
 	trimmedDir := strings.TrimSpace(keysDir)
 	if trimmedDir == "" {
@@ -111,7 +123,7 @@ func LoadTokenAuthorityFromDir(keysDir string, kidOverride string) (*TokenAuthor
 		return nil, fmt.Errorf("auth: read private key from %s: %w", trimmedDir, err)
 	}
 	pubBytes, err := os.ReadFile(filepath.Join(trimmedDir, defaultPublicKeyFile))
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("auth: read public key from %s: %w", trimmedDir, err)
 	}
 
@@ -121,8 +133,27 @@ func LoadTokenAuthorityFromDir(keysDir string, kidOverride string) (*TokenAuthor
 			kid = strings.TrimSpace(string(kidBytes))
 		}
 	}
+	if kid == "" {
+		kid = readKIDFromJWKS(filepath.Join(trimmedDir, defaultJWKSFile))
+	}
 
 	return LoadTokenAuthorityFromPEM(kid, privBytes, pubBytes)
+}
+
+func readKIDFromJWKS(jwksPath string) string {
+	raw, err := os.ReadFile(jwksPath)
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Keys []struct {
+			KID string `json:"kid"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || len(payload.Keys) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(payload.Keys[len(payload.Keys)-1].KID)
 }
 
 // EncodePEM marshals the PrivateKey (PKCS#8) and PublicKey (PKIX) into PEM blocks.
