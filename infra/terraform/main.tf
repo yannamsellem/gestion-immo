@@ -80,7 +80,7 @@ resource "cloudflare_pages_project" "web_frontend" {
   deployment_configs {
     production {
       environment_variables = {
-        PUBLIC_API_BASE_URL = "https://api.${var.domain_name}"
+        API_BASE_URL = "https://api.${var.domain_name}"
       }
       compatibility_date  = "2026-10-01"
       compatibility_flags = ["nodejs_compat"]

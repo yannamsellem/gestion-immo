@@ -1,12 +1,10 @@
 <script lang="ts">
-	import IconAlertTriangle from '@tabler/icons-svelte/icons/alert-triangle';
+	import { enhance } from '$app/forms';
 	import IconCash from '@tabler/icons-svelte/icons/cash';
 	import IconDownload from '@tabler/icons-svelte/icons/download';
 	import IconFileText from '@tabler/icons-svelte/icons/file-text';
 	import IconFileZip from '@tabler/icons-svelte/icons/file-zip';
 	import IconShieldExclamation from '@tabler/icons-svelte/icons/shield-exclamation';
-	import { toast } from 'svelte-sonner';
-	import * as Alert from '#lib/components/ui/alert/index.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Field from '#lib/components/ui/field/index.js';
@@ -15,9 +13,8 @@
 	import { Separator } from '#lib/components/ui/separator/index.js';
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
-	import { ApiError } from '#lib/core/api/api-error';
 	import { formatIsoDateFr, formatPeriodMonthFr } from '#lib/core/formatters/date';
-	import { formatCentsToEuro, parseEuroToCents } from '#lib/core/formatters/money';
+	import { formatCentsToEuro } from '#lib/core/formatters/money';
 	import type {
 		DocumentTemplateDTO,
 		GLIDossierArchiveDTO,
@@ -25,7 +22,6 @@
 	} from '#lib/modules/document/types';
 	import type { LeaseDTO, RentCallDTO } from '#lib/modules/lease/types';
 	import type { NegativePositionDTO, PaymentMethod } from '#lib/modules/payment/types';
-	import { apiRegistry } from '#lib/modules/registry';
 
 	let {
 		open = $bindable(false),
@@ -36,8 +32,10 @@
 		entityName,
 		propertyAndLotLabel,
 		periodMonth,
-		initialAction = null,
-		onChanged
+		templates = [],
+		leaseDocuments = [],
+		assembledGliArchive = null,
+		initialAction = null
 	}: {
 		open: boolean;
 		lease: LeaseDTO | null;
@@ -47,8 +45,10 @@
 		entityName: string;
 		propertyAndLotLabel: string;
 		periodMonth: string;
+		templates?: DocumentTemplateDTO[];
+		leaseDocuments?: StoredFileDTO[];
+		assembledGliArchive?: GLIDossierArchiveDTO | null;
 		initialAction?: 'pay' | 'remind' | 'generate-calls' | null;
-		onChanged: () => void;
 	} = $props();
 
 	const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string }> = [
@@ -64,16 +64,10 @@
 	let paymentLabel = $state('');
 	let paymentReference = $state('');
 	let isSubmittingPayment = $state(false);
-	let paymentError = $state<string | null>(null);
 
-	let templates = $state<DocumentTemplateDTO[]>([]);
-	let leaseDocuments = $state<StoredFileDTO[]>([]);
 	let selectedTemplateId = $state('');
 	let isGeneratingDoc = $state(false);
-	let isLoadingDocs = $state(false);
-
 	let isAssemblingGli = $state(false);
-	let assembledGliArchive = $state<GLIDossierArchiveDTO | null>(null);
 
 	const selectedMethodLabel = $derived(
 		PAYMENT_METHODS.find((item) => item.value === paymentMethod)?.label ?? 'Virement bancaire'
@@ -81,6 +75,21 @@
 
 	const selectedTemplateLabel = $derived(
 		templates.find((tpl) => tpl.id === selectedTemplateId)?.name ?? 'Choisir un modèle de document'
+	);
+
+	const gliTemplateId = $derived(
+		templates.find((tpl) => tpl.template_type === 'GLI_NOTICE' || tpl.template_type === 'REMINDER')
+			?.id ?? selectedTemplateId
+	);
+
+	const formattedAmountDue = $derived(
+		lease
+			? formatCentsToEuro(
+					rentCall?.remaining_due_cents ??
+						negativePosition?.total_unpaid_cents ??
+						lease.rent_net_cents + lease.charges_cents
+				)
+			: '0,00 €'
 	);
 
 	function centsToEditableEuroString(cents: number): string {
@@ -106,140 +115,14 @@
 			? `Loyer ${formatPeriodMonthFr(periodMonth)} — ${tenantName}`
 			: `Loyer ${formatPeriodMonthFr(periodMonth)}`;
 		paymentReference = '';
-		paymentError = null;
-		assembledGliArchive = null;
 
-		let cancelled = false;
-		isLoadingDocs = true;
-
-		void Promise.all([
-			apiRegistry.document.listTemplates().catch(() => []),
-			apiRegistry.document.listLeaseDocuments(lease.id).catch(() => [])
-		])
-			.then(([loadedTemplates, loadedDocs]) => {
-				if (cancelled) return;
-				templates = loadedTemplates;
-				leaseDocuments = loadedDocs;
-				if (loadedTemplates.length > 0 && !selectedTemplateId) {
-					const preferredType = initialAction === 'remind' ? 'REMINDER' : 'RECEIPT';
-					const preferred =
-						loadedTemplates.find((tpl) => tpl.template_type === preferredType) ??
-						loadedTemplates[0];
-					selectedTemplateId = preferred.id;
-				}
-			})
-			.finally(() => {
-				if (!cancelled) {
-					isLoadingDocs = false;
-				}
-			});
-
-		return () => {
-			cancelled = true;
-		};
+		if (templates.length > 0 && !selectedTemplateId) {
+			const preferredType = initialAction === 'remind' ? 'REMINDER' : 'RECEIPT';
+			const preferred =
+				templates.find((tpl) => tpl.template_type === preferredType) ?? templates[0];
+			selectedTemplateId = preferred.id;
+		}
 	});
-
-	async function handleRecordPayment(event: SubmitEvent) {
-		event.preventDefault();
-		if (!lease) return;
-
-		paymentError = null;
-		let amountCents: number;
-		try {
-			amountCents = parseEuroToCents(amountEuroInput);
-		} catch {
-			paymentError = 'Veuillez saisir un montant valide en euros (ex: 850,00).';
-			return;
-		}
-
-		if (amountCents <= 0) {
-			paymentError = 'Le montant du règlement doit être strictement positif.';
-			return;
-		}
-
-		isSubmittingPayment = true;
-		try {
-			if (paymentMethod === 'CASH') {
-				await apiRegistry.payment.recordCashPayment({
-					lease_id: lease.id,
-					amount_cents: amountCents,
-					label: paymentLabel.trim() || `Loyer espèces ${periodMonth}`,
-					receipt_number: paymentReference.trim() || undefined,
-					payment_date: paymentDate ? new Date(paymentDate).toISOString() : undefined
-				});
-				toast.success('Paiement en espèces imputé et inscrit au livre de caisse (PCG 530).');
-			} else {
-				await apiRegistry.payment.recordBankPayment({
-					lease_id: lease.id,
-					amount_cents: amountCents,
-					method: paymentMethod,
-					label: paymentLabel.trim() || `Règlement loyer ${periodMonth}`,
-					external_ref: paymentReference.trim() || undefined,
-					payment_date: paymentDate ? new Date(paymentDate).toISOString() : undefined
-				});
-				toast.success('Règlement enregistré et imputé (FIFO).');
-			}
-			onChanged();
-		} catch (err) {
-			paymentError =
-				err instanceof ApiError
-					? err.message
-					: 'Impossible d’enregistrer le règlement pour ce bail.';
-		} finally {
-			isSubmittingPayment = false;
-		}
-	}
-
-	async function handleGenerateDocument() {
-		if (!lease || !selectedTemplateId) return;
-		isGeneratingDoc = true;
-		try {
-			const generated = await apiRegistry.document.generateFromTemplate({
-				template_id: selectedTemplateId,
-				legal_entity_id: lease.legal_entity_id,
-				lease_id: lease.id,
-				variables: {
-					tenant_name: tenantName,
-					entity_name: entityName,
-					property_label: propertyAndLotLabel,
-					period_month: formatPeriodMonthFr(periodMonth),
-					amount_due: formatCentsToEuro(
-						rentCall?.remaining_due_cents ??
-							negativePosition?.total_unpaid_cents ??
-							lease.rent_net_cents + lease.charges_cents
-					)
-				}
-			});
-			leaseDocuments = [generated, ...leaseDocuments];
-			toast.success(`Document généré : ${generated.file_name}`);
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Échec de la génération du document.');
-		} finally {
-			isGeneratingDoc = false;
-		}
-	}
-
-	async function handleAssembleGliDossier() {
-		if (!lease) return;
-		isAssemblingGli = true;
-		try {
-			const gliTemplate = templates.find(
-				(tpl) => tpl.template_type === 'GLI_NOTICE' || tpl.template_type === 'REMINDER'
-			);
-			const archive = await apiRegistry.document.assembleGliDossier(
-				lease.id,
-				gliTemplate?.id ?? selectedTemplateId
-			);
-			assembledGliArchive = archive;
-			toast.success('Dossier sinistre GLI (.zip) assemblé avec succès.');
-		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Impossible d’assembler le dossier de sinistre GLI.'
-			);
-		} finally {
-			isAssemblingGli = false;
-		}
-	}
 </script>
 
 <Sheet.Root bind:open>
@@ -250,7 +133,7 @@
 				<Badge variant="secondary">{formatPeriodMonthFr(periodMonth)}</Badge>
 			</div>
 			<Sheet.Title class="text-base font-semibold">
-				{tenantName || 'Bail sélection'} — {propertyAndLotLabel}
+				{tenantName || 'Bail sélectionné'} — {propertyAndLotLabel}
 			</Sheet.Title>
 			<Sheet.Description>
 				{#if rentCall}
@@ -267,16 +150,23 @@
 
 		{#if lease}
 			<div class="flex flex-col gap-6 p-4">
-				{#if paymentError}
-					<Alert.Root variant="destructive">
-						<IconAlertTriangle class="size-4" />
-						<Alert.Title>Erreur de saisie</Alert.Title>
-						<Alert.Description>{paymentError}</Alert.Description>
-					</Alert.Root>
-				{/if}
-
 				<!-- Section 1: Record payment -->
-				<form onsubmit={handleRecordPayment} class="flex flex-col gap-4">
+				<form
+					method="POST"
+					action="?/recordPayment"
+					use:enhance={() => {
+						isSubmittingPayment = true;
+						return async ({ update }) => {
+							await update();
+							isSubmittingPayment = false;
+						};
+					}}
+					class="flex flex-col gap-4"
+				>
+					<input type="hidden" name="lease_id" value={lease.id} />
+					<input type="hidden" name="method" value={paymentMethod} />
+					<input type="hidden" name="period_month" value={periodMonth} />
+
 					<div class="flex items-center justify-between">
 						<h3 class="flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase">
 							<IconCash class="size-4" />
@@ -293,6 +183,7 @@
 								<Field.Label for="payment-amount">Montant encaissé (€)</Field.Label>
 								<Input
 									id="payment-amount"
+									name="amount_euro"
 									type="text"
 									inputmode="decimal"
 									placeholder="850,00"
@@ -303,7 +194,13 @@
 
 							<Field.Field>
 								<Field.Label for="payment-date">Date de règlement</Field.Label>
-								<Input id="payment-date" type="date" bind:value={paymentDate} required />
+								<Input
+									id="payment-date"
+									name="payment_date"
+									type="date"
+									bind:value={paymentDate}
+									required
+								/>
 							</Field.Field>
 						</div>
 
@@ -336,6 +233,7 @@
 								<Field.Label for="payment-label">Libellé comptable</Field.Label>
 								<Input
 									id="payment-label"
+									name="label"
 									type="text"
 									placeholder="Loyer Octobre 2026"
 									bind:value={paymentLabel}
@@ -349,6 +247,7 @@
 								</Field.Label>
 								<Input
 									id="payment-ref"
+									name="reference"
 									type="text"
 									placeholder={paymentMethod === 'CASH' ? 'RECU-2026-01' : 'VIR-99412'}
 									bind:value={paymentReference}
@@ -377,7 +276,27 @@
 					</h3>
 
 					{#if templates.length > 0}
-						<div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+						<form
+							method="POST"
+							action="?/generateDoc"
+							use:enhance={() => {
+								isGeneratingDoc = true;
+								return async ({ update }) => {
+									await update();
+									isGeneratingDoc = false;
+								};
+							}}
+							class="flex flex-col gap-2 sm:flex-row sm:items-end"
+						>
+							<input type="hidden" name="lease_id" value={lease.id} />
+							<input type="hidden" name="legal_entity_id" value={lease.legal_entity_id} />
+							<input type="hidden" name="template_id" value={selectedTemplateId} />
+							<input type="hidden" name="tenant_name" value={tenantName} />
+							<input type="hidden" name="entity_name" value={entityName} />
+							<input type="hidden" name="property_label" value={propertyAndLotLabel} />
+							<input type="hidden" name="period_month" value={periodMonth} />
+							<input type="hidden" name="amount_due" value={formattedAmountDue} />
+
 							<div class="flex-1">
 								<Select.Root
 									type="single"
@@ -401,8 +320,8 @@
 								</Select.Root>
 							</div>
 							<Button
+								type="submit"
 								variant="secondary"
-								onclick={handleGenerateDocument}
 								disabled={isGeneratingDoc || !selectedTemplateId}
 							>
 								{#if isGeneratingDoc}
@@ -410,7 +329,7 @@
 								{/if}
 								Générer le document
 							</Button>
-						</div>
+						</form>
 					{:else}
 						<p class="text-xs text-muted-foreground">
 							Aucun modèle de document enregistré. Vous pouvez en créer un depuis les paramètres ou
@@ -418,9 +337,7 @@
 						</p>
 					{/if}
 
-					{#if isLoadingDocs}
-						<p class="text-xs text-muted-foreground">Chargement des documents du bail...</p>
-					{:else if leaseDocuments.length > 0}
+					{#if leaseDocuments.length > 0}
 						<div class="flex flex-col gap-1.5 rounded-md border p-2.5">
 							{#each leaseDocuments as doc (doc.id)}
 								<div class="flex items-center justify-between gap-2 text-xs">
@@ -487,23 +404,38 @@
 						</p>
 					{/if}
 
-					<Button
-						variant={negativePosition && negativePosition.total_unpaid_cents > 0
-							? 'destructive'
-							: 'outline'}
-						onclick={handleAssembleGliDossier}
-						disabled={isAssemblingGli}
+					<form
+						method="POST"
+						action="?/assembleGli"
+						use:enhance={() => {
+							isAssemblingGli = true;
+							return async ({ update }) => {
+								await update();
+								isAssemblingGli = false;
+							};
+						}}
 					>
-						{#if isAssemblingGli}
-							<Spinner data-icon="inline-start" />
-							Assemblage de l'archive .zip...
-						{:else}
-							<IconFileZip data-icon="inline-start" />
-							Assembler le dossier sinistre GLI (.zip)
-						{/if}
-					</Button>
+						<input type="hidden" name="lease_id" value={lease.id} />
+						<input type="hidden" name="template_id" value={gliTemplateId} />
+						<Button
+							type="submit"
+							class="w-full"
+							variant={negativePosition && negativePosition.total_unpaid_cents > 0
+								? 'destructive'
+								: 'outline'}
+							disabled={isAssemblingGli}
+						>
+							{#if isAssemblingGli}
+								<Spinner data-icon="inline-start" />
+								Assemblage de l'archive .zip...
+							{:else}
+								<IconFileZip data-icon="inline-start" />
+								Assembler le dossier sinistre GLI (.zip)
+							{/if}
+						</Button>
+					</form>
 
-					{#if assembledGliArchive}
+					{#if assembledGliArchive && assembledGliArchive.lease_id === lease.id}
 						<div class="flex flex-col gap-2 rounded-md border bg-muted/50 p-3 text-xs">
 							<div class="flex items-center justify-between">
 								<span class="font-semibold">Archive GLI prête</span>

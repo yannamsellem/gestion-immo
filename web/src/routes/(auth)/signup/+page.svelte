@@ -1,47 +1,18 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import IconUserPlus from '@tabler/icons-svelte/icons/user-plus';
-	import { toast } from 'svelte-sonner';
+	import ThemeToggle from '#lib/components/layout/ThemeToggle.svelte';
 	import * as Alert from '#lib/components/ui/alert/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Field from '#lib/components/ui/field/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
-	import ThemeToggle from '#lib/components/layout/ThemeToggle.svelte';
-	import { ApiError } from '#lib/core/api/api-error';
-	import { apiRegistry } from '#lib/modules/registry';
+	import type { PageProps } from './$types';
 
-	let fullName = $state('');
-	let email = $state('');
-	let password = $state('');
-	let errorMessage = $state<string | null>(null);
-	let submittedEmail = $state<string | null>(null);
+	let { form }: PageProps = $props();
 	let isSubmitting = $state(false);
-
-	async function handleSubmit(event: SubmitEvent): Promise<void> {
-		event.preventDefault();
-		errorMessage = null;
-		isSubmitting = true;
-
-		try {
-			const created = await apiRegistry.auth.signup({
-				full_name: fullName.trim(),
-				email: email.trim(),
-				password
-			});
-			submittedEmail = created.email;
-			toast.success('Demande de compte enregistrée');
-		} catch (err) {
-			if (err instanceof ApiError) {
-				errorMessage = err.message;
-			} else {
-				errorMessage = "Impossible d'enregistrer votre demande.";
-			}
-		} finally {
-			isSubmitting = false;
-		}
-	}
 </script>
 
 <div class="flex min-h-screen flex-col justify-center bg-background p-4">
@@ -58,34 +29,44 @@
 		</Card.Header>
 
 		<Card.Content>
-			{#if submittedEmail}
+			{#if form?.submittedEmail}
 				<Alert.Root>
 					<Alert.Title>Compte en attente d'approbation (202 Accepted)</Alert.Title>
 					<Alert.Description>
-						Votre demande pour <strong>{submittedEmail}</strong> a bien été enregistrée avec le
+						Votre demande pour <strong>{form.submittedEmail}</strong> a bien été enregistrée avec le
 						statut
 						<code>PENDING_APPROVAL</code>. Un administrateur doit l'approuver avant votre première
 						connexion.
 					</Alert.Description>
 				</Alert.Root>
 			{:else}
-				{#if errorMessage}
+				{#if form?.errorMessage}
 					<Alert.Root variant="destructive" class="mb-4">
 						<Alert.Title>Erreur d'inscription</Alert.Title>
-						<Alert.Description>{errorMessage}</Alert.Description>
+						<Alert.Description>{form.errorMessage}</Alert.Description>
 					</Alert.Root>
 				{/if}
 
-				<form onsubmit={handleSubmit}>
+				<form
+					method="POST"
+					use:enhance={() => {
+						isSubmitting = true;
+						return async ({ update }) => {
+							await update();
+							isSubmitting = false;
+						};
+					}}
+				>
 					<Field.FieldGroup>
 						<Field.Field>
 							<Field.FieldLabel for="signup-name">Nom complet</Field.FieldLabel>
 							<Input
 								id="signup-name"
+								name="full_name"
 								type="text"
 								required
 								placeholder="Jean Dupont"
-								bind:value={fullName}
+								value={form?.fullName ?? ''}
 							/>
 						</Field.Field>
 
@@ -93,11 +74,12 @@
 							<Field.FieldLabel for="signup-email">Adresse e-mail professionnelle</Field.FieldLabel>
 							<Input
 								id="signup-email"
+								name="email"
 								type="email"
 								required
 								autocomplete="email"
 								placeholder="jean.dupont@exemple.fr"
-								bind:value={email}
+								value={form?.email ?? ''}
 							/>
 						</Field.Field>
 
@@ -107,12 +89,12 @@
 							</Field.FieldLabel>
 							<Input
 								id="signup-password"
+								name="password"
 								type="password"
 								required
 								minlength={8}
 								autocomplete="new-password"
 								placeholder="••••••••••••"
-								bind:value={password}
 							/>
 						</Field.Field>
 

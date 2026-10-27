@@ -29,6 +29,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/inspection-templates", h.handleListTemplates)
 	mux.HandleFunc("GET /api/v1/inspection-templates/{id}", h.handleGetTemplate)
 	mux.HandleFunc("POST /api/v1/inspections", h.handleCreateInspection)
+	mux.HandleFunc("GET /api/v1/inspections", h.handleListInspections)
 	mux.HandleFunc("GET /api/v1/inspections/{id}", h.handleGetInspection)
 	mux.HandleFunc("PUT /api/v1/inspections/{id}/items", h.handleUpsertInspectionItems)
 	mux.HandleFunc("POST /api/v1/inspections/{id}/pdf", h.handleGenerateInspectionPDF)
@@ -89,6 +90,23 @@ func (h *Handler) handleCreateInspection(w http.ResponseWriter, r *http.Request)
 	}
 
 	httpx.Created(w, dto)
+}
+
+func (h *Handler) handleListInspections(w http.ResponseWriter, r *http.Request) {
+	leaseID := strings.TrimSpace(r.URL.Query().Get("lease_id"))
+	if leaseID == "" {
+		httpx.OK(w, []application.InspectionDTO{})
+		return
+	}
+	list, err := h.svc.ListInspectionsByLease(r.Context(), leaseID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if list == nil {
+		list = []application.InspectionDTO{}
+	}
+	httpx.OK(w, list)
 }
 
 func (h *Handler) handleGetInspection(w http.ResponseWriter, r *http.Request) {

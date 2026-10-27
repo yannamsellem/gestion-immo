@@ -9,6 +9,7 @@ export interface HttpClient {
 export interface FetchHttpClientOptions {
 	baseUrl?: string;
 	fetchFn?: typeof fetch;
+	defaultHeaders?: Record<string, string>;
 	getAccessToken?: () => string | null;
 	refreshSession?: () => Promise<string | null>;
 	onUnauthorized?: () => void;
@@ -17,6 +18,7 @@ export interface FetchHttpClientOptions {
 export class FetchHttpClient implements HttpClient {
 	private readonly baseUrl: string;
 	private readonly fetchFn: typeof fetch;
+	private readonly defaultHeaders: Record<string, string>;
 	private readonly getAccessToken?: () => string | null;
 	private readonly refreshSession?: () => Promise<string | null>;
 	private readonly onUnauthorized?: () => void;
@@ -25,6 +27,7 @@ export class FetchHttpClient implements HttpClient {
 	constructor(options: FetchHttpClientOptions = {}) {
 		this.baseUrl = (options.baseUrl ?? '').replace(/\/$/, '');
 		this.fetchFn = options.fetchFn ?? ((input, init) => fetch(input, init));
+		this.defaultHeaders = options.defaultHeaders ?? {};
 		this.getAccessToken = options.getAccessToken;
 		this.refreshSession = options.refreshSession;
 		this.onUnauthorized = options.onUnauthorized;
@@ -95,7 +98,10 @@ export class FetchHttpClient implements HttpClient {
 		retried = false
 	): Promise<Response> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		const headers: Record<string, string> = this.normalizeHeaders(init.headers);
+		const headers: Record<string, string> = {
+			...this.defaultHeaders,
+			...this.normalizeHeaders(init.headers)
+		};
 
 		const token = this.getAccessToken?.();
 		if (token) {

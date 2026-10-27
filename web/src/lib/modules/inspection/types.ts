@@ -1,12 +1,12 @@
-export type InspectionType = 'ENTRANT' | 'SORTANT' | string;
-export type ConditionState = 'NEW' | 'GOOD' | 'FAIR' | 'POOR' | 'DAMAGED' | string;
+export type InspectionType = 'MOVE_IN' | 'MOVE_OUT' | string;
+export type ConditionState = 'NEW' | 'GOOD' | 'FAIR_WEAR' | 'POOR' | 'OUT_OF_SERVICE' | string;
 export type IncidentStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED' | string;
 
 export interface MeterReadings {
-	electricity_hp_kwh?: number;
-	electricity_hc_kwh?: number;
-	water_cold_m3?: number;
-	water_hot_m3?: number;
+	water_m3?: number;
+	electricity_pdl?: string;
+	electricity_kwh?: number;
+	gas_pce?: string;
 	gas_m3?: number;
 }
 

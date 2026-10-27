@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import IconAlertTriangle from '@tabler/icons-svelte/icons/alert-triangle';
 	import IconClipboardCheck from '@tabler/icons-svelte/icons/clipboard-check';
@@ -19,14 +20,11 @@
 	import * as Select from '#lib/components/ui/select/index.js';
 	import { Separator } from '#lib/components/ui/separator/index.js';
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
-	import { Skeleton } from '#lib/components/ui/skeleton/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import * as Tabs from '#lib/components/ui/tabs/index.js';
-	import { ApiError } from '#lib/core/api/api-error';
 	import { formatIsoDateFr } from '#lib/core/formatters/date';
-	import { formatCentsToEuro, parseEuroToCents } from '#lib/core/formatters/money';
-	import { workspaceStore } from '#lib/core/workspace/workspace.svelte';
+	import { formatCentsToEuro } from '#lib/core/formatters/money';
 	import type {
 		ConditionState,
 		IncidentDTO,
@@ -34,12 +32,12 @@
 		InspectionDTO,
 		InspectionItemInput,
 		InspectionReportDTO,
-		InspectionTemplateDTO,
 		InspectionType
 	} from '#lib/modules/inspection/types';
-	import type { LeaseDTO, TenantDTO } from '#lib/modules/lease/types';
-	import type { PropertyDTO } from '#lib/modules/portfolio/types';
-	import { apiRegistry } from '#lib/modules/registry';
+	import type { LeaseDTO } from '#lib/modules/lease/types';
+	import type { PageProps } from './$types';
+
+	let { data, form }: PageProps = $props();
 
 	const INCIDENT_STATUS_OPTIONS: Array<{ value: IncidentStatus; label: string }> = [
 		{ value: 'OPEN', label: 'Ouvert' },
@@ -51,21 +49,12 @@
 	const CONDITION_OPTIONS: Array<{ value: ConditionState; label: string }> = [
 		{ value: 'NEW', label: 'Neuf' },
 		{ value: 'GOOD', label: 'Bon état' },
-		{ value: 'FAIR', label: 'État d’usage' },
+		{ value: 'FAIR_WEAR', label: 'État d’usage' },
 		{ value: 'POOR', label: 'Mauvais état' },
-		{ value: 'DAMAGED', label: 'Dégradé' }
+		{ value: 'OUT_OF_SERVICE', label: 'Hors service' }
 	];
 
 	let activeTab = $state<'incidents' | 'inspections'>('incidents');
-	let isLoading = $state(true);
-	let errorMessage = $state<string | null>(null);
-	let reloadCounter = $state(0);
-
-	let incidents = $state<IncidentDTO[]>([]);
-	let templates = $state<InspectionTemplateDTO[]>([]);
-	let properties = $state<PropertyDTO[]>([]);
-	let leases = $state<LeaseDTO[]>([]);
-	let tenants = $state<TenantDTO[]>([]);
 
 	// Create Incident Sheet
 	let createIncidentOpen = $state(false);
@@ -97,13 +86,12 @@
 	// Inspection creation & editing Sheet
 	let newInspectionLeaseId = $state('');
 	let newInspectionTemplateId = $state('');
-	let newInspectionType = $state<InspectionType>('ENTRANT');
+	let newInspectionType = $state<InspectionType>('MOVE_IN');
 	let newInspectionEntryId = $state('');
 	let newInspectionKeysCount = $state('2');
 	let newInspectionKeysDesc = $state('Clés porte blindée + badge immeuble');
 	let isCreatingInspection = $state(false);
 
-	let recentInspections = $state<InspectionDTO[]>([]);
 	let activeInspection = $state<InspectionDTO | null>(null);
 	let activeInspectionItems = $state<InspectionItemInput[]>([]);
 	let activeInspectionReport = $state<InspectionReportDTO | null>(null);
@@ -111,11 +99,19 @@
 	let isSavingInspectionItems = $state(false);
 	let isGeneratingPdf = $state(false);
 
+	const moveInInspectionsForSelectedLease = $derived(
+		data.inspections.filter(
+			(insp) => insp.lease_id === newInspectionLeaseId && insp.type === 'MOVE_IN'
+		)
+	);
+
+	function formatInspectionTypeLabel(type: InspectionType): string {
+		if (type === 'MOVE_IN') return 'Entrant';
+		if (type === 'MOVE_OUT') return 'Sortant';
+		return type;
+	}
+
 	$effect(() => {
-		const urlEntityId = page.url.searchParams.get('entityId');
-		if (urlEntityId && urlEntityId !== workspaceStore.selectedEntityId) {
-			workspaceStore.setEntityId(urlEntityId);
-		}
 		const urlTab = page.url.searchParams.get('tab');
 		if (urlTab === 'inspections' || urlTab === 'incidents') {
 			activeTab = urlTab;
@@ -123,99 +119,66 @@
 	});
 
 	$effect(() => {
-		const selectedEntityId = workspaceStore.selectedEntityId;
-		const trigger = reloadCounter;
-		void trigger;
+		if (data.properties.length > 0 && !newIncidentPropertyId) {
+			newIncidentPropertyId = data.properties[0].id;
+		}
+		if (data.leases.length > 0 && !newInspectionLeaseId) {
+			newInspectionLeaseId = data.leases[0].id;
+		}
+		if (data.templates.length > 0 && !newInspectionTemplateId) {
+			newInspectionTemplateId = data.templates[0].id;
+		}
+	});
 
-		let cancelled = false;
-		isLoading = true;
-		errorMessage = null;
-
-		void (async () => {
-			try {
-				const allEntities = await apiRegistry.portfolio.listEntities();
-				if (cancelled) return;
-				workspaceStore.setEntities(allEntities);
-
-				const targetEntities =
-					selectedEntityId === 'ALL'
-						? allEntities
-						: allEntities.filter((e) => e.id === selectedEntityId);
-
-				const [loadedIncidents, loadedTemplates, loadedLeases, loadedTenants, propArrays] =
-					await Promise.all([
-						apiRegistry.inspection.listIncidents(),
-						apiRegistry.inspection.listTemplates(),
-						apiRegistry.lease.listLeases(selectedEntityId),
-						apiRegistry.lease.listTenants(true),
-						Promise.all(
-							targetEntities.map((entity) => apiRegistry.portfolio.listProperties(entity.id))
-						)
-					]);
-
-				if (cancelled) return;
-
-				const flatProps = propArrays.flat();
-				const allowedPropertyIds = new Set(flatProps.map((p) => p.id));
-				const allowedLeaseIds = new Set(loadedLeases.map((l) => l.id));
-
-				incidents =
-					selectedEntityId === 'ALL'
-						? loadedIncidents
-						: loadedIncidents.filter(
-								(inc) =>
-									(inc.property_id && allowedPropertyIds.has(inc.property_id)) ||
-									(inc.lease_id && allowedLeaseIds.has(inc.lease_id)) ||
-									(!inc.property_id && !inc.lease_id)
-							);
-				templates = loadedTemplates;
-				properties = flatProps;
-				leases = loadedLeases.filter((l) => l.active);
-				tenants = loadedTenants;
-
-				if (flatProps.length > 0 && !newIncidentPropertyId) {
-					newIncidentPropertyId = flatProps[0].id;
-				}
-				if (leases.length > 0 && !newInspectionLeaseId) {
-					newInspectionLeaseId = leases[0].id;
-				}
-				if (loadedTemplates.length > 0 && !newInspectionTemplateId) {
-					newInspectionTemplateId = loadedTemplates[0].id;
-				}
-			} catch (err) {
-				if (cancelled) return;
-				errorMessage =
-					err instanceof ApiError
-						? err.message
-						: 'Impossible de charger les incidents et états des lieux.';
-			} finally {
-				if (!cancelled) {
-					isLoading = false;
-				}
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-		};
+	$effect(() => {
+		if (form?.successMessage) {
+			toast.success(form.successMessage);
+		}
+		if (form?.actionError) {
+			toast.error(form.actionError);
+		}
+		if (form?.incidentCreated) {
+			createIncidentOpen = false;
+			newIncidentTitle = '';
+			newIncidentClaimNumber = '';
+			newIncidentObservation = '';
+		}
+		if (form?.updatedIncident) {
+			selectedIncident = form.updatedIncident;
+			editIncidentNewObservation = '';
+		}
+		if (form?.createdTemplate) {
+			newInspectionTemplateId = form.createdTemplate.id;
+			createTemplateOpen = false;
+			newTemplateName = '';
+		}
+		if (form?.createdInspection) {
+			openInspectionSheet(form.createdInspection);
+		}
+		if (form?.updatedInspection) {
+			activeInspection = form.updatedInspection;
+		}
+		if (form?.generatedReport) {
+			activeInspectionReport = form.generatedReport;
+		}
 	});
 
 	// Auto-open incident Sheet when arriving from Cockpit with ?incidentId=...
 	$effect(() => {
-		if (isLoading || incidents.length === 0) return;
+		if (data.incidents.length === 0) return;
 		const urlIncidentId = page.url.searchParams.get('incidentId');
 		if (!urlIncidentId || autoOpenedIncidentId === urlIncidentId) return;
 
-		const match = incidents.find((inc) => inc.id === urlIncidentId);
+		const match = data.incidents.find((inc) => inc.id === urlIncidentId);
 		if (match) {
 			openEditIncidentSheet(match);
 			autoOpenedIncidentId = urlIncidentId;
 		}
 	});
 
-	const propertyMap = $derived(new Map(properties.map((p) => [p.id, p])));
-	const tenantMap = $derived(new Map(tenants.map((t) => [t.id, t])));
-	const leaseMap = $derived(new Map(leases.map((l) => [l.id, l])));
+	const propertyMap = $derived(new Map(data.properties.map((p) => [p.id, p])));
+	const tenantMap = $derived(new Map(data.tenants.map((t) => [t.id, t])));
+	const leaseMap = $derived(new Map(data.leases.map((l) => [l.id, l])));
 
 	function formatLeaseDisplayLabel(lease: LeaseDTO): string {
 		const tenant = tenantMap.get(lease.tenant_id);
@@ -244,140 +207,6 @@
 		editIncidentOpen = true;
 	}
 
-	async function handleCreateIncident(event: SubmitEvent) {
-		event.preventDefault();
-		if (!newIncidentTitle.trim()) return;
-
-		let estimatedCostCents: number;
-		try {
-			estimatedCostCents = parseEuroToCents(newIncidentEstimatedEuro || '0');
-		} catch {
-			toast.error('Montant estimé invalide.');
-			return;
-		}
-
-		isCreatingIncident = true;
-		try {
-			await apiRegistry.inspection.createIncident({
-				property_id: newIncidentPropertyId || undefined,
-				lease_id: newIncidentLeaseId || undefined,
-				title: newIncidentTitle.trim(),
-				status: 'OPEN',
-				insurance_claim_number: newIncidentClaimNumber.trim() || undefined,
-				estimated_cost_cents: estimatedCostCents,
-				observations: newIncidentObservation.trim() ? [newIncidentObservation.trim()] : []
-			});
-			toast.success('Incident enregistré.');
-			createIncidentOpen = false;
-			newIncidentTitle = '';
-			newIncidentClaimNumber = '';
-			newIncidentObservation = '';
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Erreur lors de la création.');
-		} finally {
-			isCreatingIncident = false;
-		}
-	}
-
-	async function handleUpdateIncident(event: SubmitEvent) {
-		event.preventDefault();
-		if (!selectedIncident) return;
-
-		let estimatedCostCents: number;
-		try {
-			estimatedCostCents = parseEuroToCents(editIncidentCostEuro || '0');
-		} catch {
-			toast.error('Coût estimé invalide.');
-			return;
-		}
-
-		isUpdatingIncident = true;
-		try {
-			const updated = await apiRegistry.inspection.updateIncident(selectedIncident.id, {
-				status: editIncidentStatus,
-				insurance_claim_number: editIncidentClaimNumber.trim() || undefined,
-				estimated_cost_cents: estimatedCostCents,
-				add_observation: editIncidentNewObservation.trim() || undefined
-			});
-			selectedIncident = updated;
-			editIncidentNewObservation = '';
-			toast.success('Incident mis à jour.');
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Impossible de mettre à jour l’incident.'
-			);
-		} finally {
-			isUpdatingIncident = false;
-		}
-	}
-
-	async function handleCreateTemplate(event: SubmitEvent) {
-		event.preventDefault();
-		const rooms = newTemplateRoomsText
-			.split(',')
-			.map((s) => s.trim())
-			.filter(Boolean);
-		const defaultElements = newTemplateElementsText
-			.split(',')
-			.map((s) => s.trim())
-			.filter(Boolean);
-
-		if (!newTemplateName.trim() || rooms.length === 0) {
-			toast.error('Veuillez renseigner un nom et au moins une pièce.');
-			return;
-		}
-
-		isCreatingTemplate = true;
-		try {
-			const created = await apiRegistry.inspection.createTemplate({
-				name: newTemplateName.trim(),
-				rooms,
-				default_elements: defaultElements
-			});
-			templates = [created, ...templates];
-			newInspectionTemplateId = created.id;
-			createTemplateOpen = false;
-			newTemplateName = '';
-			toast.success('Modèle d’état des lieux créé.');
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Erreur lors de la création du modèle.');
-		} finally {
-			isCreatingTemplate = false;
-		}
-	}
-
-	async function handleCreateInspection(event: SubmitEvent) {
-		event.preventDefault();
-		if (!newInspectionLeaseId || !newInspectionTemplateId) {
-			toast.error('Sélectionnez un bail et un modèle d’état des lieux.');
-			return;
-		}
-
-		isCreatingInspection = true;
-		try {
-			const created = await apiRegistry.inspection.createInspection({
-				lease_id: newInspectionLeaseId,
-				template_id: newInspectionTemplateId,
-				type: newInspectionType,
-				entry_inspection_id:
-					newInspectionType === 'SORTANT' && newInspectionEntryId.trim()
-						? newInspectionEntryId.trim()
-						: undefined,
-				keys_handed_over_count: Number.parseInt(newInspectionKeysCount, 10) || 0,
-				keys_description: newInspectionKeysDesc.trim() || undefined
-			});
-			recentInspections = [created, ...recentInspections];
-			openInspectionSheet(created);
-			toast.success(`État des lieux ${created.type} initialisé.`);
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Impossible de créer l’état des lieux.');
-		} finally {
-			isCreatingInspection = false;
-		}
-	}
-
 	function openInspectionSheet(inspection: InspectionDTO) {
 		activeInspection = inspection;
 		activeInspectionReport = null;
@@ -389,7 +218,7 @@
 				observation: item.observation ?? ''
 			}));
 		} else {
-			const tpl = templates.find((t) => t.id === inspection.template_id);
+			const tpl = data.templates.find((t) => t.id === inspection.template_id);
 			const rooms = tpl?.rooms ?? ['Séjour', 'Cuisine', 'Chambre', 'Salle de bain'];
 			const elements = tpl?.default_elements?.length
 				? tpl.default_elements.slice(0, 3)
@@ -409,41 +238,6 @@
 		}
 		inspectionSheetOpen = true;
 	}
-
-	async function handleSaveInspectionItems() {
-		if (!activeInspection) return;
-		isSavingInspectionItems = true;
-		try {
-			const updated = await apiRegistry.inspection.upsertInspectionItems(
-				activeInspection.id,
-				activeInspectionItems
-			);
-			activeInspection = updated;
-			recentInspections = recentInspections.map((item) =>
-				item.id === updated.id ? updated : item
-			);
-			toast.success('Relevé pièce par pièce enregistré.');
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Impossible d’enregistrer les éléments.');
-		} finally {
-			isSavingInspectionItems = false;
-		}
-	}
-
-	async function handleGenerateInspectionPdf() {
-		if (!activeInspection) return;
-		isGeneratingPdf = true;
-		try {
-			await handleSaveInspectionItems();
-			const report = await apiRegistry.inspection.generateInspectionPdf(activeInspection.id);
-			activeInspectionReport = report;
-			toast.success('Rapport PDF contradictoire généré.');
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Échec de la génération du rapport PDF.');
-		} finally {
-			isGeneratingPdf = false;
-		}
-	}
 </script>
 
 <PageHeader
@@ -462,29 +256,27 @@
 	{/snippet}
 </PageHeader>
 
-{#if errorMessage}
+{#if data.errorMessage}
 	<Alert.Root variant="destructive">
 		<IconAlertTriangle class="size-4" />
 		<Alert.Title>Erreur</Alert.Title>
-		<Alert.Description>{errorMessage}</Alert.Description>
+		<Alert.Description>{data.errorMessage}</Alert.Description>
 	</Alert.Root>
 {/if}
 
 <Tabs.Root bind:value={activeTab}>
 	<Tabs.List>
 		<Tabs.Trigger value="incidents">
-			Incidents & Sinistres ({incidents.length})
+			Incidents & Sinistres ({data.incidents.length})
 		</Tabs.Trigger>
 		<Tabs.Trigger value="inspections">
-			États des lieux & Modèles ({templates.length})
+			États des lieux & Modèles ({data.templates.length})
 		</Tabs.Trigger>
 	</Tabs.List>
 
 	<!-- Tab 1: Incidents -->
 	<Tabs.Content value="incidents" class="mt-4">
-		{#if isLoading}
-			<Skeleton class="h-48 w-full" />
-		{:else if incidents.length === 0}
+		{#if data.incidents.length === 0}
 			<Card.Root>
 				<Card.Content class="py-10">
 					<Empty.Root>
@@ -523,7 +315,7 @@
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
-							{#each incidents as incident (incident.id)}
+							{#each data.incidents as incident (incident.id)}
 								<Table.Row class="cursor-pointer" onclick={() => openEditIncidentSheet(incident)}>
 									<Table.Cell class="pl-4 text-xs">
 										{formatIsoDateFr(incident.occurred_at)}
@@ -585,7 +377,22 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content>
-					<form onsubmit={handleCreateInspection} class="flex flex-col gap-4">
+					<form
+						method="POST"
+						action="?/createInspection"
+						use:enhance={() => {
+							isCreatingInspection = true;
+							return async ({ update }) => {
+								await update();
+								isCreatingInspection = false;
+							};
+						}}
+						class="flex flex-col gap-4"
+					>
+						<input type="hidden" name="lease_id" value={newInspectionLeaseId} />
+						<input type="hidden" name="template_id" value={newInspectionTemplateId} />
+						<input type="hidden" name="type" value={newInspectionType} />
+
 						<Field.FieldGroup>
 							<Field.Field>
 								<Field.Label>Bail locatif</Field.Label>
@@ -605,7 +412,7 @@
 									</Select.Trigger>
 									<Select.Content>
 										<Select.Group>
-											{#each leases as lease (lease.id)}
+											{#each data.leases as lease (lease.id)}
 												<Select.Item value={lease.id} label={formatLeaseDisplayLabel(lease)}>
 													{formatLeaseDisplayLabel(lease)}
 												</Select.Item>
@@ -626,16 +433,16 @@
 										}}
 									>
 										<Select.Trigger class="w-full">
-											{newInspectionType === 'ENTRANT'
+											{newInspectionType === 'MOVE_IN'
 												? 'Entrant (Remise des clés)'
 												: 'Sortant (Comparatif)'}
 										</Select.Trigger>
 										<Select.Content>
 											<Select.Group>
-												<Select.Item value="ENTRANT" label="Entrant">
+												<Select.Item value="MOVE_IN" label="Entrant">
 													Entrant (Remise des clés)
 												</Select.Item>
-												<Select.Item value="SORTANT" label="Sortant">
+												<Select.Item value="MOVE_OUT" label="Sortant">
 													Sortant (Comparatif)
 												</Select.Item>
 											</Select.Group>
@@ -653,12 +460,12 @@
 										}}
 									>
 										<Select.Trigger class="w-full">
-											{templates.find((t) => t.id === newInspectionTemplateId)?.name ??
+											{data.templates.find((t) => t.id === newInspectionTemplateId)?.name ??
 												'Choisir un modèle'}
 										</Select.Trigger>
 										<Select.Content>
 											<Select.Group>
-												{#each templates as tpl (tpl.id)}
+												{#each data.templates as tpl (tpl.id)}
 													<Select.Item value={tpl.id} label={tpl.name}>
 														{tpl.name} ({tpl.rooms.length} pièces)
 													</Select.Item>
@@ -669,16 +476,48 @@
 								</Field.Field>
 							</div>
 
-							{#if newInspectionType === 'SORTANT'}
+							{#if newInspectionType === 'MOVE_OUT'}
+								<input type="hidden" name="entry_inspection_id" value={newInspectionEntryId} />
 								<Field.Field>
-									<Field.Label for="entry-edl-id">
-										ID de l'état des lieux d'entrée (pour comparatif automatique)
+									<Field.Label>
+										État des lieux d'entrée de référence (comparatif automatique)
 									</Field.Label>
-									<Input
-										id="entry-edl-id"
-										placeholder="UUID de l'EDL entrant (optionnel)"
-										bind:value={newInspectionEntryId}
-									/>
+									<Select.Root
+										type="single"
+										value={newInspectionEntryId}
+										onValueChange={(v) => {
+											if (v !== undefined) newInspectionEntryId = v;
+										}}
+									>
+										<Select.Trigger class="w-full">
+											{#if newInspectionEntryId}
+												{@const entryInsp = moveInInspectionsForSelectedLease.find(
+													(i) => i.id === newInspectionEntryId
+												)}
+												{entryInsp
+													? `EDL Entrant du ${formatIsoDateFr(entryInsp.inspection_date)} (${entryInsp.id.slice(0, 8)})`
+													: newInspectionEntryId}
+											{:else}
+												Aucun EDL d'entrée rattaché (rapport autonome)
+											{/if}
+										</Select.Trigger>
+										<Select.Content>
+											<Select.Group>
+												<Select.Item value="" label="Aucun (rapport autonome)">
+													Aucun EDL d'entrée rattaché (rapport autonome)
+												</Select.Item>
+												{#each moveInInspectionsForSelectedLease as entryInsp (entryInsp.id)}
+													<Select.Item
+														value={entryInsp.id}
+														label={`EDL Entrant du ${formatIsoDateFr(entryInsp.inspection_date)}`}
+													>
+														EDL Entrant du {formatIsoDateFr(entryInsp.inspection_date)} ({entryInsp
+															.items.length} éléments)
+													</Select.Item>
+												{/each}
+											</Select.Group>
+										</Select.Content>
+									</Select.Root>
 								</Field.Field>
 							{/if}
 
@@ -687,6 +526,7 @@
 									<Field.Label for="keys-count">Nombre de clés remises</Field.Label>
 									<Input
 										id="keys-count"
+										name="keys_count"
 										type="number"
 										min="0"
 										bind:value={newInspectionKeysCount}
@@ -694,14 +534,20 @@
 								</Field.Field>
 								<Field.Field>
 									<Field.Label for="keys-desc">Détail des clés / badges</Field.Label>
-									<Input id="keys-desc" bind:value={newInspectionKeysDesc} />
+									<Input
+										id="keys-desc"
+										name="keys_description"
+										bind:value={newInspectionKeysDesc}
+									/>
 								</Field.Field>
 							</div>
 						</Field.FieldGroup>
 
 						<Button
 							type="submit"
-							disabled={isCreatingInspection || leases.length === 0 || templates.length === 0}
+							disabled={isCreatingInspection ||
+								data.leases.length === 0 ||
+								data.templates.length === 0}
 						>
 							{#if isCreatingInspection}
 								<Spinner data-icon="inline-start" />
@@ -723,13 +569,13 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="flex flex-col gap-4">
-					{#if templates.length === 0}
+					{#if data.templates.length === 0}
 						<p class="text-xs text-muted-foreground">
 							Aucun modèle configuré. Cliquez sur « Nouveau modèle EDL » en haut à droite.
 						</p>
 					{:else}
 						<div class="flex flex-col gap-2">
-							{#each templates as tpl (tpl.id)}
+							{#each data.templates as tpl (tpl.id)}
 								<div class="flex items-center justify-between rounded-md border p-2.5 text-xs">
 									<div class="flex flex-col gap-0.5">
 										<span class="font-medium">{tpl.name}</span>
@@ -743,23 +589,44 @@
 						</div>
 					{/if}
 
-					{#if recentInspections.length > 0}
+					{#if data.inspections.length > 0}
 						<Separator />
 						<div class="flex flex-col gap-2">
-							<span class="text-xs font-semibold">États des lieux ouverts dans cette session</span>
-							{#each recentInspections as insp (insp.id)}
-								<div class="flex items-center justify-between rounded-md border p-2.5 text-xs">
-									<div class="flex flex-col">
-										<span class="font-medium">
-											EDL {insp.type} — {formatIsoDateFr(insp.inspection_date)}
+							<span class="text-xs font-semibold">
+								États des lieux enregistrés ({data.inspections.length})
+							</span>
+							{#each data.inspections as insp (insp.id)}
+								{@const lease = leaseMap.get(insp.lease_id)}
+								<div
+									class="flex items-center justify-between gap-2 rounded-md border p-2.5 text-xs"
+								>
+									<div class="flex min-w-0 flex-col">
+										<span class="truncate font-medium">
+											EDL {formatInspectionTypeLabel(insp.type)} — {formatIsoDateFr(
+												insp.inspection_date
+											)}
 										</span>
-										<span class="font-mono text-[11px] text-muted-foreground">
-											ID : {insp.id}
+										<span class="truncate text-[11px] text-muted-foreground">
+											{lease ? formatLeaseDisplayLabel(lease) : insp.lease_id} · {insp.items.length} élément(s)
 										</span>
 									</div>
-									<Button size="sm" variant="secondary" onclick={() => openInspectionSheet(insp)}>
-										Compléter / PDF →
-									</Button>
+									<div class="flex shrink-0 items-center gap-1.5">
+										{#if insp.report_download_url}
+											<Button
+												size="sm"
+												variant="outline"
+												href={insp.report_download_url}
+												target="_blank"
+												rel="noreferrer"
+											>
+												<IconDownload data-icon="inline-start" />
+												PDF
+											</Button>
+										{/if}
+										<Button size="sm" variant="secondary" onclick={() => openInspectionSheet(insp)}>
+											Grille →
+										</Button>
+									</div>
 								</div>
 							{/each}
 						</div>
@@ -780,12 +647,27 @@
 			</Sheet.Description>
 		</Sheet.Header>
 
-		<form onsubmit={handleCreateIncident} class="flex flex-col gap-4 p-4">
+		<form
+			method="POST"
+			action="?/createIncident"
+			use:enhance={() => {
+				isCreatingIncident = true;
+				return async ({ update }) => {
+					await update();
+					isCreatingIncident = false;
+				};
+			}}
+			class="flex flex-col gap-4 p-4"
+		>
+			<input type="hidden" name="property_id" value={newIncidentPropertyId} />
+			<input type="hidden" name="lease_id" value={newIncidentLeaseId} />
+
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label for="inc-title">Intitulé de l'incident</Field.Label>
 					<Input
 						id="inc-title"
+						name="title"
 						placeholder="Dégât des eaux salle de bain"
 						bind:value={newIncidentTitle}
 						required
@@ -806,7 +688,7 @@
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Group>
-								{#each properties as prop (prop.id)}
+								{#each data.properties as prop (prop.id)}
 									<Select.Item value={prop.id} label={prop.label}>{prop.label}</Select.Item>
 								{/each}
 							</Select.Group>
@@ -832,7 +714,7 @@
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Group>
-								{#each leases as lease (lease.id)}
+								{#each data.leases as lease (lease.id)}
 									<Select.Item value={lease.id} label={formatLeaseDisplayLabel(lease)}>
 										{formatLeaseDisplayLabel(lease)}
 									</Select.Item>
@@ -845,13 +727,19 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="inc-claim">N° dossier assurance</Field.Label>
-						<Input id="inc-claim" placeholder="SIN-2026-884" bind:value={newIncidentClaimNumber} />
+						<Input
+							id="inc-claim"
+							name="insurance_claim_number"
+							placeholder="SIN-2026-884"
+							bind:value={newIncidentClaimNumber}
+						/>
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="inc-cost">Coût estimé (€)</Field.Label>
 						<Input
 							id="inc-cost"
+							name="estimated_cost_euro"
 							type="text"
 							inputmode="decimal"
 							placeholder="350,00"
@@ -864,6 +752,7 @@
 					<Field.Label for="inc-obs">Observation initiale</Field.Label>
 					<Input
 						id="inc-obs"
+						name="observation"
 						placeholder="Plombier mandaté pour recherche de fuite"
 						bind:value={newIncidentObservation}
 					/>
@@ -891,7 +780,21 @@
 		</Sheet.Header>
 
 		{#if selectedIncident}
-			<form onsubmit={handleUpdateIncident} class="flex flex-col gap-4 p-4">
+			<form
+				method="POST"
+				action="?/updateIncident"
+				use:enhance={() => {
+					isUpdatingIncident = true;
+					return async ({ update }) => {
+						await update();
+						isUpdatingIncident = false;
+					};
+				}}
+				class="flex flex-col gap-4 p-4"
+			>
+				<input type="hidden" name="incident_id" value={selectedIncident.id} />
+				<input type="hidden" name="status" value={editIncidentStatus} />
+
 				<Field.FieldGroup>
 					<Field.Field>
 						<Field.Label>Statut d'avancement</Field.Label>
@@ -918,13 +821,18 @@
 					<div class="grid gap-3 sm:grid-cols-2">
 						<Field.Field>
 							<Field.Label for="edit-inc-claim">N° sinistre assurance</Field.Label>
-							<Input id="edit-inc-claim" bind:value={editIncidentClaimNumber} />
+							<Input
+								id="edit-inc-claim"
+								name="insurance_claim_number"
+								bind:value={editIncidentClaimNumber}
+							/>
 						</Field.Field>
 
 						<Field.Field>
 							<Field.Label for="edit-inc-cost">Coût estimé (€)</Field.Label>
 							<Input
 								id="edit-inc-cost"
+								name="estimated_cost_euro"
 								type="text"
 								inputmode="decimal"
 								bind:value={editIncidentCostEuro}
@@ -936,6 +844,7 @@
 						<Field.Label for="edit-inc-obs">Ajouter une note de suivi</Field.Label>
 						<Input
 							id="edit-inc-obs"
+							name="add_observation"
 							placeholder="Devis validé / intervention planifiée..."
 							bind:value={editIncidentNewObservation}
 						/>
@@ -970,7 +879,9 @@
 	<Sheet.Content side="right" class="w-full overflow-y-auto sm:max-w-xl">
 		<Sheet.Header class="border-b pb-4">
 			<Sheet.Title>
-				Grille d'état des lieux {activeInspection?.type ?? ''}
+				Grille d'état des lieux {activeInspection
+					? formatInspectionTypeLabel(activeInspection.type)
+					: ''}
 			</Sheet.Title>
 			<Sheet.Description>
 				Qualifiez chaque équipement pièce par pièce puis générez le rapport PDF contradictoire.
@@ -1025,25 +936,49 @@
 				</div>
 
 				<div class="flex flex-wrap items-center gap-2">
-					<Button
-						variant="secondary"
-						onclick={handleSaveInspectionItems}
-						disabled={isSavingInspectionItems}
+					<form
+						method="POST"
+						action="?/saveInspectionItems"
+						use:enhance={() => {
+							isSavingInspectionItems = true;
+							return async ({ update }) => {
+								await update();
+								isSavingInspectionItems = false;
+							};
+						}}
 					>
-						{#if isSavingInspectionItems}
-							<Spinner data-icon="inline-start" />
-						{/if}
-						Sauvegarder la grille
-					</Button>
+						<input type="hidden" name="inspection_id" value={activeInspection.id} />
+						<input type="hidden" name="items_json" value={JSON.stringify(activeInspectionItems)} />
+						<Button type="submit" variant="secondary" disabled={isSavingInspectionItems}>
+							{#if isSavingInspectionItems}
+								<Spinner data-icon="inline-start" />
+							{/if}
+							Sauvegarder la grille
+						</Button>
+					</form>
 
-					<Button onclick={handleGenerateInspectionPdf} disabled={isGeneratingPdf}>
-						{#if isGeneratingPdf}
-							<Spinner data-icon="inline-start" />
-						{:else}
-							<IconFileText data-icon="inline-start" />
-						{/if}
-						Générer le PDF contradictoire
-					</Button>
+					<form
+						method="POST"
+						action="?/generatePdf"
+						use:enhance={() => {
+							isGeneratingPdf = true;
+							return async ({ update }) => {
+								await update();
+								isGeneratingPdf = false;
+							};
+						}}
+					>
+						<input type="hidden" name="inspection_id" value={activeInspection.id} />
+						<input type="hidden" name="items_json" value={JSON.stringify(activeInspectionItems)} />
+						<Button type="submit" disabled={isGeneratingPdf}>
+							{#if isGeneratingPdf}
+								<Spinner data-icon="inline-start" />
+							{:else}
+								<IconFileText data-icon="inline-start" />
+							{/if}
+							Générer le PDF contradictoire
+						</Button>
+					</form>
 				</div>
 
 				{#if activeInspectionReport}
@@ -1087,12 +1022,24 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<form onsubmit={handleCreateTemplate} class="flex flex-col gap-4">
+		<form
+			method="POST"
+			action="?/createTemplate"
+			use:enhance={() => {
+				isCreatingTemplate = true;
+				return async ({ update }) => {
+					await update();
+					isCreatingTemplate = false;
+				};
+			}}
+			class="flex flex-col gap-4"
+		>
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label for="tpl-name">Nom du modèle</Field.Label>
 					<Input
 						id="tpl-name"
+						name="name"
 						placeholder="Appartement T2 Standard"
 						bind:value={newTemplateName}
 						required
@@ -1101,12 +1048,17 @@
 
 				<Field.Field>
 					<Field.Label for="tpl-rooms">Pièces (séparées par des virgules)</Field.Label>
-					<Input id="tpl-rooms" bind:value={newTemplateRoomsText} required />
+					<Input id="tpl-rooms" name="rooms_text" bind:value={newTemplateRoomsText} required />
 				</Field.Field>
 
 				<Field.Field>
 					<Field.Label for="tpl-elems">Éléments par pièce (séparés par des virgules)</Field.Label>
-					<Input id="tpl-elems" bind:value={newTemplateElementsText} required />
+					<Input
+						id="tpl-elems"
+						name="elements_text"
+						bind:value={newTemplateElementsText}
+						required
+					/>
 				</Field.Field>
 			</Field.FieldGroup>
 

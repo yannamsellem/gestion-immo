@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import IconAlertTriangle from '@tabler/icons-svelte/icons/alert-triangle';
 	import IconArchive from '@tabler/icons-svelte/icons/archive';
@@ -21,28 +22,18 @@
 	import * as Select from '#lib/components/ui/select/index.js';
 	import { Separator } from '#lib/components/ui/separator/index.js';
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
-	import { Skeleton } from '#lib/components/ui/skeleton/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import * as Tabs from '#lib/components/ui/tabs/index.js';
-	import { ApiError } from '#lib/core/api/api-error';
 	import { formatIsoDateFr } from '#lib/core/formatters/date';
-	import {
-		formatBasisPointsToPercent,
-		formatCentsToEuro,
-		parseEuroToCents,
-		parsePercentToBasisPoints
-	} from '#lib/core/formatters/money';
+	import { formatBasisPointsToPercent, formatCentsToEuro } from '#lib/core/formatters/money';
 	import { workspaceStore } from '#lib/core/workspace/workspace.svelte';
-	import type {
-		DocumentTemplateDTO,
-		StoredFileDTO,
-		TemplateFormat,
-		TemplateType
-	} from '#lib/modules/document/types';
-	import type { LeaseDTO, LeaseType, TenantDTO } from '#lib/modules/lease/types';
-	import type { LegalEntityDTO, LotDTO, PropertyDTO } from '#lib/modules/portfolio/types';
-	import { apiRegistry } from '#lib/modules/registry';
+	import type { TemplateFormat, TemplateType } from '#lib/modules/document/types';
+	import type { LeaseDTO, LeaseType } from '#lib/modules/lease/types';
+	import type { LotDTO, PropertyDTO } from '#lib/modules/portfolio/types';
+	import type { PageProps } from './$types';
+
+	let { data, form }: PageProps = $props();
 
 	const LEASE_TYPES: Array<{ value: LeaseType; label: string }> = [
 		{ value: 'RESIDENTIAL_EMPTY', label: 'Habitation vide (Loi 89 — 3 ans)' },
@@ -60,15 +51,6 @@
 	];
 
 	let activeTab = $state<'leases' | 'tenants' | 'templates'>('leases');
-	let isLoading = $state(true);
-	let errorMessage = $state<string | null>(null);
-	let reloadCounter = $state(0);
-
-	let entities = $state<LegalEntityDTO[]>([]);
-	let properties = $state<PropertyDTO[]>([]);
-	let leases = $state<LeaseDTO[]>([]);
-	let tenants = $state<TenantDTO[]>([]);
-	let templates = $state<DocumentTemplateDTO[]>([]);
 
 	// Create Lease Sheet
 	let createLeaseOpen = $state(false);
@@ -98,10 +80,9 @@
 	// Lease Detail & Documents Sheet
 	let leaseDocsSheetOpen = $state(false);
 	let selectedLease = $state<LeaseDTO | null>(null);
-	let selectedLeaseDocs = $state<StoredFileDTO[]>([]);
 	let selectedTemplateId = $state('');
 	let uploadCategory = $state('BAIL_SIGNE');
-	let uploadFile = $state<File | null>(null);
+	let hasUploadFile = $state(false);
 	let isUploadingDoc = $state(false);
 	let isGeneratingDoc = $state(false);
 
@@ -119,263 +100,95 @@
 	let autoHandledUrl = $state(false);
 
 	$effect(() => {
-		const urlEntityId = page.url.searchParams.get('entityId');
-		if (urlEntityId && urlEntityId !== workspaceStore.selectedEntityId) {
-			workspaceStore.setEntityId(urlEntityId);
+		if (data.entities.length > 0 && !leaseEntityId) {
+			leaseEntityId =
+				workspaceStore.selectedEntityId !== 'ALL'
+					? workspaceStore.selectedEntityId
+					: data.entities[0].id;
+		}
+		const allLots = data.properties.flatMap((p) => p.lots ?? []);
+		if (allLots.length > 0 && !leaseLotId) {
+			leaseLotId = allLots[0].id;
+		}
+		const activeTenants = data.tenants.filter((t) => !t.archived);
+		if (activeTenants.length > 0 && !leaseTenantId) {
+			leaseTenantId = activeTenants[0].id;
+		}
+		if (data.templates.length > 0 && !selectedTemplateId) {
+			selectedTemplateId = data.templates[0].id;
+		}
+
+		if (!autoHandledUrl) {
+			const action = page.url.searchParams.get('action');
+			const urlLotId = page.url.searchParams.get('lotId');
+			if (urlLotId) {
+				leaseLotId = urlLotId;
+				const ownerProp = data.properties.find((p) =>
+					(p.lots ?? []).some((lot) => lot.id === urlLotId)
+				);
+				if (ownerProp) {
+					leaseEntityId = ownerProp.legal_entity_id;
+				}
+			}
+			if (action === 'create' || urlLotId) {
+				createLeaseOpen = true;
+				autoHandledUrl = true;
+			}
 		}
 	});
 
 	$effect(() => {
-		const selectedEntityId = workspaceStore.selectedEntityId;
-		const trigger = reloadCounter;
-		void trigger;
-
-		let cancelled = false;
-		isLoading = true;
-		errorMessage = null;
-
-		void (async () => {
-			try {
-				const allEntities = await apiRegistry.portfolio.listEntities();
-				if (cancelled) return;
-				entities = allEntities;
-				workspaceStore.setEntities(allEntities);
-
-				const targetEntities =
-					selectedEntityId === 'ALL'
-						? allEntities
-						: allEntities.filter((e) => e.id === selectedEntityId);
-
-				if (targetEntities.length > 0 && !leaseEntityId) {
-					leaseEntityId = targetEntities[0].id;
-				}
-
-				const [propLists, loadedLeases, loadedTenants, loadedTemplates] = await Promise.all([
-					Promise.all(
-						targetEntities.map((entity) => apiRegistry.portfolio.listProperties(entity.id))
-					),
-					apiRegistry.lease.listLeases(selectedEntityId),
-					apiRegistry.lease.listTenants(true),
-					apiRegistry.document.listTemplates().catch(() => [])
-				]);
-				if (cancelled) return;
-
-				const flatProps = propLists.flat();
-				properties = flatProps;
-				leases = loadedLeases;
-				tenants = loadedTenants;
-				templates = loadedTemplates;
-
-				const allLots = flatProps.flatMap((p) => p.lots ?? []);
-				if (allLots.length > 0 && !leaseLotId) {
-					leaseLotId = allLots[0].id;
-				}
-				const activeTenants = loadedTenants.filter((t) => !t.archived);
-				if (activeTenants.length > 0 && !leaseTenantId) {
-					leaseTenantId = activeTenants[0].id;
-				}
-				if (loadedTemplates.length > 0 && !selectedTemplateId) {
-					selectedTemplateId = loadedTemplates[0].id;
-				}
-
-				if (!autoHandledUrl) {
-					const action = page.url.searchParams.get('action');
-					const urlLotId = page.url.searchParams.get('lotId');
-					if (urlLotId) {
-						leaseLotId = urlLotId;
-						const ownerProp = flatProps.find((p) =>
-							(p.lots ?? []).some((lot) => lot.id === urlLotId)
-						);
-						if (ownerProp) {
-							leaseEntityId = ownerProp.legal_entity_id;
-						}
-					}
-					if (action === 'create' || urlLotId) {
-						createLeaseOpen = true;
-						autoHandledUrl = true;
-					}
-				}
-			} catch (err) {
-				if (cancelled) return;
-				errorMessage =
-					err instanceof ApiError ? err.message : 'Impossible de charger les baux et locataires.';
-			} finally {
-				if (!cancelled) {
-					isLoading = false;
-				}
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-		};
+		if (form?.successMessage) {
+			toast.success(form.successMessage);
+		}
+		if (form?.actionError) {
+			toast.error(form.actionError);
+		}
+		if (form?.createdTenant) {
+			createTenantOpen = false;
+			tenantFullName = '';
+			tenantEmail = '';
+			tenantPhone = '';
+			tenantAddress = '';
+			leaseTenantId = form.createdTenant.id;
+		}
+		if (form?.leaseCreated) {
+			createLeaseOpen = false;
+		}
+		if (form?.registeredTemplate) {
+			selectedTemplateId = form.registeredTemplate.id;
+			registerTemplateOpen = false;
+			tplName = '';
+		}
 	});
 
-	const entityMap = $derived(new Map(entities.map((e) => [e.id, e])));
-	const tenantMap = $derived(new Map(tenants.map((t) => [t.id, t])));
+	const entityMap = $derived(new Map(data.entities.map((e) => [e.id, e])));
+	const tenantMap = $derived(new Map(data.tenants.map((t) => [t.id, t])));
 	const lotInfoMap = $derived(
 		new Map<string, { lot: LotDTO; property: PropertyDTO }>(
-			properties.flatMap((prop) =>
+			data.properties.flatMap((prop) =>
 				(prop.lots ?? []).map((lot) => [lot.id, { lot, property: prop }] as const)
 			)
 		)
 	);
 
 	const availableLotsForSelectedEntity = $derived(
-		properties
+		data.properties
 			.filter((p) => !leaseEntityId || p.legal_entity_id === leaseEntityId)
 			.flatMap((p) => (p.lots ?? []).map((lot) => ({ lot, property: p })))
+	);
+
+	const selectedLeaseDocs = $derived(
+		selectedLease ? (data.documentsByLeaseId[selectedLease.id] ?? []) : []
 	);
 
 	function formatLeaseTypeLabel(lt: string): string {
 		return LEASE_TYPES.find((item) => item.value === lt)?.label ?? lt;
 	}
 
-	async function handleCreateTenant(event: SubmitEvent) {
-		event.preventDefault();
-		if (!tenantFullName.trim()) return;
-
-		isCreatingTenant = true;
-		try {
-			const created = await apiRegistry.lease.createTenant({
-				full_name: tenantFullName.trim(),
-				email: tenantEmail.trim(),
-				phone: tenantPhone.trim(),
-				address: tenantAddress.trim()
-			});
-			toast.success(`Locataire « ${created.full_name} » enregistré.`);
-			createTenantOpen = false;
-			tenantFullName = '';
-			tenantEmail = '';
-			tenantPhone = '';
-			tenantAddress = '';
-			leaseTenantId = created.id;
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Échec de la création du locataire.');
-		} finally {
-			isCreatingTenant = false;
-		}
-	}
-
-	async function handleArchiveTenant(tenant: TenantDTO) {
-		try {
-			await apiRegistry.lease.archiveTenant(tenant.id);
-			toast.success(`Locataire « ${tenant.full_name} » archivé (conformité RGPD).`);
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Impossible d’archiver ce locataire.');
-		}
-	}
-
-	async function handleCreateLease(event: SubmitEvent) {
-		event.preventDefault();
-		if (!leaseEntityId || !leaseLotId || !leaseTenantId) {
-			toast.error('Veuillez sélectionner une entité, un lot et un locataire.');
-			return;
-		}
-
-		let rentNetCents: number;
-		let chargesCents: number;
-		let depositCents: number;
-		let vatBasisPoints = 0;
-
-		try {
-			rentNetCents = parseEuroToCents(leaseRentNetEuro);
-			chargesCents = parseEuroToCents(leaseChargesEuro || '0');
-			depositCents = parseEuroToCents(leaseDepositEuro || '0');
-			if (leaseSubjectToVat) {
-				vatBasisPoints = parsePercentToBasisPoints(leaseVatPercent);
-			}
-		} catch {
-			toast.error('Montant de loyer, charges, dépôt ou taux de TVA invalide.');
-			return;
-		}
-
-		isCreatingLease = true;
-		try {
-			await apiRegistry.lease.createLease({
-				legal_entity_id: leaseEntityId,
-				lot_id: leaseLotId,
-				tenant_id: leaseTenantId,
-				lease_type: leaseType,
-				rent_net_cents: rentNetCents,
-				charges_cents: chargesCents,
-				subject_to_vat: leaseSubjectToVat,
-				vat_rate_basis_points: vatBasisPoints,
-				security_deposit_cents: depositCents,
-				due_day_of_month: Number.parseInt(leaseDueDay, 10) || 5,
-				gli_policy_number: leaseGliPolicy.trim(),
-				guarantor_name: leaseGuarantor.trim(),
-				start_date: leaseStartDate ? new Date(leaseStartDate).toISOString() : undefined
-			});
-			toast.success('Contrat de bail créé.');
-			createLeaseOpen = false;
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Impossible de créer le bail.');
-		} finally {
-			isCreatingLease = false;
-		}
-	}
-
-	async function openLeaseDocumentsSheet(lease: LeaseDTO) {
+	function openLeaseDocumentsSheet(lease: LeaseDTO) {
 		selectedLease = lease;
 		leaseDocsSheetOpen = true;
-		selectedLeaseDocs = await apiRegistry.document.listLeaseDocuments(lease.id).catch(() => []);
-	}
-
-	async function handleGenerateLeaseDoc() {
-		if (!selectedLease || !selectedTemplateId) return;
-		isGeneratingDoc = true;
-		try {
-			const tenant = tenantMap.get(selectedLease.tenant_id);
-			const entity = entityMap.get(selectedLease.legal_entity_id);
-			const lotInfo = lotInfoMap.get(selectedLease.lot_id);
-
-			const generated = await apiRegistry.document.generateFromTemplate({
-				template_id: selectedTemplateId,
-				legal_entity_id: selectedLease.legal_entity_id,
-				lease_id: selectedLease.id,
-				variables: {
-					tenant_name: tenant?.full_name ?? 'Locataire',
-					entity_name: entity?.name ?? 'Bailleur',
-					property_label: lotInfo
-						? `${lotInfo.property.label} — ${lotInfo.lot.label}`
-						: selectedLease.lot_id,
-					rent_net: formatCentsToEuro(selectedLease.rent_net_cents),
-					charges: formatCentsToEuro(selectedLease.charges_cents)
-				}
-			});
-			selectedLeaseDocs = [generated, ...selectedLeaseDocs];
-			toast.success(`Document généré : ${generated.file_name}`);
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Échec de la génération.');
-		} finally {
-			isGeneratingDoc = false;
-		}
-	}
-
-	async function handleUploadLeaseFile(event: SubmitEvent) {
-		event.preventDefault();
-		if (!selectedLease || !uploadFile) return;
-
-		isUploadingDoc = true;
-		try {
-			const uploaded = await apiRegistry.document.uploadFile({
-				legalEntityId: selectedLease.legal_entity_id,
-				leaseId: selectedLease.id,
-				category: uploadCategory,
-				file: uploadFile
-			});
-			selectedLeaseDocs = [uploaded, ...selectedLeaseDocs];
-			uploadFile = null;
-			toast.success('Pièce justificative téléversée dans le coffre-fort R2.');
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Échec du téléversement.');
-		} finally {
-			isUploadingDoc = false;
-		}
 	}
 
 	async function handleDocxFileInput(event: Event) {
@@ -389,31 +202,6 @@
 			binary += String.fromCharCode(b);
 		}
 		tplDocxBase64 = btoa(binary);
-	}
-
-	async function handleRegisterTemplate(event: SubmitEvent) {
-		event.preventDefault();
-		if (!tplName.trim()) return;
-
-		isRegisteringTemplate = true;
-		try {
-			const created = await apiRegistry.document.registerTemplate({
-				name: tplName.trim(),
-				template_type: tplType,
-				format: tplFormat,
-				html_body: tplFormat === 'HTML' ? tplHtmlBody : undefined,
-				docx_base64: tplFormat === 'DOCX' ? tplDocxBase64 : undefined
-			});
-			templates = [created, ...templates];
-			selectedTemplateId = created.id;
-			registerTemplateOpen = false;
-			tplName = '';
-			toast.success('Modèle documentaire enregistré.');
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Impossible d’enregistrer le modèle.');
-		} finally {
-			isRegisteringTemplate = false;
-		}
 	}
 </script>
 
@@ -437,26 +225,24 @@
 	{/snippet}
 </PageHeader>
 
-{#if errorMessage}
+{#if data.errorMessage}
 	<Alert.Root variant="destructive">
 		<IconAlertTriangle class="size-4" />
 		<Alert.Title>Erreur</Alert.Title>
-		<Alert.Description>{errorMessage}</Alert.Description>
+		<Alert.Description>{data.errorMessage}</Alert.Description>
 	</Alert.Root>
 {/if}
 
 <Tabs.Root bind:value={activeTab}>
 	<Tabs.List>
-		<Tabs.Trigger value="leases">Baux locatifs ({leases.length})</Tabs.Trigger>
-		<Tabs.Trigger value="tenants">Locataires & RGPD ({tenants.length})</Tabs.Trigger>
-		<Tabs.Trigger value="templates">Modèles de contrats ({templates.length})</Tabs.Trigger>
+		<Tabs.Trigger value="leases">Baux locatifs ({data.leases.length})</Tabs.Trigger>
+		<Tabs.Trigger value="tenants">Locataires & RGPD ({data.tenants.length})</Tabs.Trigger>
+		<Tabs.Trigger value="templates">Modèles de contrats ({data.templates.length})</Tabs.Trigger>
 	</Tabs.List>
 
 	<!-- Tab 1: Leases -->
 	<Tabs.Content value="leases" class="mt-4">
-		{#if isLoading}
-			<Skeleton class="h-48 w-full" />
-		{:else if leases.length === 0}
+		{#if data.leases.length === 0}
 			<Card.Root>
 				<Card.Content class="py-10">
 					<Empty.Root>
@@ -494,7 +280,7 @@
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
-							{#each leases as lease (lease.id)}
+							{#each data.leases as lease (lease.id)}
 								{@const lotInfo = lotInfoMap.get(lease.lot_id)}
 								{@const tenant = tenantMap.get(lease.tenant_id)}
 								<Table.Row>
@@ -568,7 +354,7 @@
 	<Tabs.Content value="tenants" class="mt-4">
 		<Card.Root>
 			<Card.Content class="p-0">
-				{#if tenants.length === 0}
+				{#if data.tenants.length === 0}
 					<p class="px-4 py-6 text-xs text-muted-foreground">Aucun locataire enregistré.</p>
 				{:else}
 					<Table.Root>
@@ -582,7 +368,7 @@
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
-							{#each tenants as tenant (tenant.id)}
+							{#each data.tenants as tenant (tenant.id)}
 								<Table.Row>
 									<Table.Cell class="pl-4 font-medium">{tenant.full_name}</Table.Cell>
 									<Table.Cell class="text-xs">
@@ -603,14 +389,14 @@
 									</Table.Cell>
 									<Table.Cell class="pr-4 text-right">
 										{#if !tenant.archived}
-											<Button
-												size="sm"
-												variant="outline"
-												onclick={() => handleArchiveTenant(tenant)}
-											>
-												<IconArchive data-icon="inline-start" />
-												Archiver RGPD
-											</Button>
+											<form method="POST" action="?/archiveTenant" use:enhance class="inline">
+												<input type="hidden" name="tenant_id" value={tenant.id} />
+												<input type="hidden" name="tenant_name" value={tenant.full_name} />
+												<Button type="submit" size="sm" variant="outline">
+													<IconArchive data-icon="inline-start" />
+													Archiver RGPD
+												</Button>
+											</form>
 										{/if}
 									</Table.Cell>
 								</Table.Row>
@@ -626,7 +412,7 @@
 	<Tabs.Content value="templates" class="mt-4">
 		<Card.Root>
 			<Card.Content class="p-0">
-				{#if templates.length === 0}
+				{#if data.templates.length === 0}
 					<p class="px-4 py-6 text-xs text-muted-foreground">
 						Aucun modèle documentaire enregistré. Cliquez sur « Nouveau modèle (.docx / HTML) ».
 					</p>
@@ -641,7 +427,7 @@
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
-							{#each templates as tpl (tpl.id)}
+							{#each data.templates as tpl (tpl.id)}
 								<Table.Row>
 									<Table.Cell class="pl-4 font-medium">{tpl.name}</Table.Cell>
 									<Table.Cell>
@@ -673,7 +459,24 @@
 			</Sheet.Description>
 		</Sheet.Header>
 
-		<form onsubmit={handleCreateLease} class="flex flex-col gap-4 p-4">
+		<form
+			method="POST"
+			action="?/createLease"
+			use:enhance={() => {
+				isCreatingLease = true;
+				return async ({ update }) => {
+					await update();
+					isCreatingLease = false;
+				};
+			}}
+			class="flex flex-col gap-4 p-4"
+		>
+			<input type="hidden" name="legal_entity_id" value={leaseEntityId} />
+			<input type="hidden" name="lot_id" value={leaseLotId} />
+			<input type="hidden" name="tenant_id" value={leaseTenantId} />
+			<input type="hidden" name="lease_type" value={leaseType} />
+			<input type="hidden" name="subject_to_vat" value={leaseSubjectToVat ? 'true' : 'false'} />
+
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label>Entité bailleresse</Field.Label>
@@ -689,7 +492,7 @@
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Group>
-								{#each entities as entity (entity.id)}
+								{#each data.entities as entity (entity.id)}
 									<Select.Item value={entity.id} label={entity.name}>{entity.name}</Select.Item>
 								{/each}
 							</Select.Group>
@@ -743,7 +546,7 @@
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Group>
-								{#each tenants.filter((t) => !t.archived) as tenant (tenant.id)}
+								{#each data.tenants.filter((t) => !t.archived) as tenant (tenant.id)}
 									<Select.Item value={tenant.id} label={tenant.full_name}>
 										{tenant.full_name}
 									</Select.Item>
@@ -780,6 +583,7 @@
 						<Field.Label for="l-rent">Loyer HC (€)</Field.Label>
 						<Input
 							id="l-rent"
+							name="rent_net_euro"
 							type="text"
 							inputmode="decimal"
 							bind:value={leaseRentNetEuro}
@@ -789,12 +593,24 @@
 
 					<Field.Field>
 						<Field.Label for="l-charges">Provisions charges (€)</Field.Label>
-						<Input id="l-charges" type="text" inputmode="decimal" bind:value={leaseChargesEuro} />
+						<Input
+							id="l-charges"
+							name="charges_euro"
+							type="text"
+							inputmode="decimal"
+							bind:value={leaseChargesEuro}
+						/>
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="l-dep">Dépôt garantie (€)</Field.Label>
-						<Input id="l-dep" type="text" inputmode="decimal" bind:value={leaseDepositEuro} />
+						<Input
+							id="l-dep"
+							name="deposit_euro"
+							type="text"
+							inputmode="decimal"
+							bind:value={leaseDepositEuro}
+						/>
 					</Field.Field>
 				</div>
 
@@ -805,6 +621,7 @@
 					</div>
 					{#if leaseSubjectToVat}
 						<Input
+							name="vat_percent"
 							class="h-8 w-24 text-right"
 							type="text"
 							inputmode="decimal"
@@ -817,24 +634,48 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="l-start">Date de prise d'effet</Field.Label>
-						<Input id="l-start" type="date" bind:value={leaseStartDate} required />
+						<Input
+							id="l-start"
+							name="start_date"
+							type="date"
+							bind:value={leaseStartDate}
+							required
+						/>
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="l-day">Jour d'échéance mensuel (1-28)</Field.Label>
-						<Input id="l-day" type="number" min="1" max="28" bind:value={leaseDueDay} required />
+						<Input
+							id="l-day"
+							name="due_day"
+							type="number"
+							min="1"
+							max="28"
+							bind:value={leaseDueDay}
+							required
+						/>
 					</Field.Field>
 				</div>
 
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="l-gli">N° police assurance GLI</Field.Label>
-						<Input id="l-gli" placeholder="GLI-AXA-2026-99" bind:value={leaseGliPolicy} />
+						<Input
+							id="l-gli"
+							name="gli_policy_number"
+							placeholder="GLI-AXA-2026-99"
+							bind:value={leaseGliPolicy}
+						/>
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="l-guar">Garant physique / Visale</Field.Label>
-						<Input id="l-guar" placeholder="Caution solidaire" bind:value={leaseGuarantor} />
+						<Input
+							id="l-guar"
+							name="guarantor_name"
+							placeholder="Caution solidaire"
+							bind:value={leaseGuarantor}
+						/>
 					</Field.Field>
 				</div>
 			</Field.FieldGroup>
@@ -859,17 +700,35 @@
 			</Sheet.Description>
 		</Sheet.Header>
 
-		<form onsubmit={handleCreateTenant} class="flex flex-col gap-4 p-4">
+		<form
+			method="POST"
+			action="?/createTenant"
+			use:enhance={() => {
+				isCreatingTenant = true;
+				return async ({ update }) => {
+					await update();
+					isCreatingTenant = false;
+				};
+			}}
+			class="flex flex-col gap-4 p-4"
+		>
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label for="t-name">Nom complet / Raison sociale</Field.Label>
-					<Input id="t-name" placeholder="Claire Martin" bind:value={tenantFullName} required />
+					<Input
+						id="t-name"
+						name="full_name"
+						placeholder="Claire Martin"
+						bind:value={tenantFullName}
+						required
+					/>
 				</Field.Field>
 
 				<Field.Field>
 					<Field.Label for="t-email">Adresse e-mail</Field.Label>
 					<Input
 						id="t-email"
+						name="email"
 						type="email"
 						placeholder="claire.martin@exemple.fr"
 						bind:value={tenantEmail}
@@ -879,13 +738,20 @@
 
 				<Field.Field>
 					<Field.Label for="t-phone">Téléphone</Field.Label>
-					<Input id="t-phone" type="tel" placeholder="06 12 34 56 78" bind:value={tenantPhone} />
+					<Input
+						id="t-phone"
+						name="phone"
+						type="tel"
+						placeholder="06 12 34 56 78"
+						bind:value={tenantPhone}
+					/>
 				</Field.Field>
 
 				<Field.Field>
 					<Field.Label for="t-addr">Adresse postale</Field.Label>
 					<Input
 						id="t-addr"
+						name="address"
 						placeholder="12 rue de Rivoli, 75004 Paris"
 						bind:value={tenantAddress}
 					/>
@@ -914,12 +780,41 @@
 		</Sheet.Header>
 
 		{#if selectedLease}
+			{@const tenant = tenantMap.get(selectedLease.tenant_id)}
+			{@const entity = entityMap.get(selectedLease.legal_entity_id)}
+			{@const lotInfo = lotInfoMap.get(selectedLease.lot_id)}
 			<div class="flex flex-col gap-6 p-4">
 				<!-- Generate from template -->
 				<div class="flex flex-col gap-3">
 					<h3 class="text-xs font-semibold uppercase">1. Générer depuis un modèle</h3>
-					{#if templates.length > 0}
-						<div class="flex gap-2">
+					{#if data.templates.length > 0}
+						<form
+							method="POST"
+							action="?/generateDoc"
+							use:enhance={() => {
+								isGeneratingDoc = true;
+								return async ({ update }) => {
+									await update();
+									isGeneratingDoc = false;
+								};
+							}}
+							class="flex gap-2"
+						>
+							<input type="hidden" name="lease_id" value={selectedLease.id} />
+							<input type="hidden" name="legal_entity_id" value={selectedLease.legal_entity_id} />
+							<input type="hidden" name="template_id" value={selectedTemplateId} />
+							<input type="hidden" name="tenant_name" value={tenant?.full_name ?? 'Locataire'} />
+							<input type="hidden" name="entity_name" value={entity?.name ?? 'Bailleur'} />
+							<input
+								type="hidden"
+								name="property_label"
+								value={lotInfo
+									? `${lotInfo.property.label} — ${lotInfo.lot.label}`
+									: selectedLease.lot_id}
+							/>
+							<input type="hidden" name="rent_net_cents" value={selectedLease.rent_net_cents} />
+							<input type="hidden" name="charges_cents" value={selectedLease.charges_cents} />
+
 							<div class="flex-1">
 								<Select.Root
 									type="single"
@@ -929,12 +824,12 @@
 									}}
 								>
 									<Select.Trigger class="w-full">
-										{templates.find((t) => t.id === selectedTemplateId)?.name ??
+										{data.templates.find((t) => t.id === selectedTemplateId)?.name ??
 											'Sélectionner un modèle'}
 									</Select.Trigger>
 									<Select.Content>
 										<Select.Group>
-											{#each templates as tpl (tpl.id)}
+											{#each data.templates as tpl (tpl.id)}
 												<Select.Item value={tpl.id} label={tpl.name}>
 													{tpl.name} ({tpl.format})
 												</Select.Item>
@@ -944,8 +839,8 @@
 								</Select.Root>
 							</div>
 							<Button
+								type="submit"
 								variant="secondary"
-								onclick={handleGenerateLeaseDoc}
 								disabled={isGeneratingDoc || !selectedTemplateId}
 							>
 								{#if isGeneratingDoc}
@@ -953,7 +848,7 @@
 								{/if}
 								Générer
 							</Button>
-						</div>
+						</form>
 					{:else}
 						<p class="text-xs text-muted-foreground">Aucun modèle enregistré.</p>
 					{/if}
@@ -962,13 +857,30 @@
 				<Separator />
 
 				<!-- Upload file to R2 -->
-				<form onsubmit={handleUploadLeaseFile} class="flex flex-col gap-3">
+				<form
+					method="POST"
+					action="?/uploadFile"
+					enctype="multipart/form-data"
+					use:enhance={() => {
+						isUploadingDoc = true;
+						return async ({ update }) => {
+							await update();
+							isUploadingDoc = false;
+							hasUploadFile = false;
+						};
+					}}
+					class="flex flex-col gap-3"
+				>
+					<input type="hidden" name="lease_id" value={selectedLease.id} />
+					<input type="hidden" name="legal_entity_id" value={selectedLease.legal_entity_id} />
+
 					<h3 class="text-xs font-semibold uppercase">2. Téléverser une pièce (Cloudflare R2)</h3>
 					<Field.FieldGroup>
 						<Field.Field>
 							<Field.Label for="up-cat">Catégorie de pièce</Field.Label>
 							<Input
 								id="up-cat"
+								name="category"
 								placeholder="BAIL_SIGNE, ATTESTATION_ASSURANCE, CAUTION..."
 								bind:value={uploadCategory}
 								required
@@ -979,16 +891,17 @@
 							<Field.Label for="up-file">Fichier PDF / DOCX / Image</Field.Label>
 							<Input
 								id="up-file"
+								name="file"
 								type="file"
 								onchange={(e) => {
-									uploadFile = (e.currentTarget as HTMLInputElement).files?.[0] ?? null;
+									hasUploadFile = Boolean((e.currentTarget as HTMLInputElement).files?.length);
 								}}
 								required
 							/>
 						</Field.Field>
 					</Field.FieldGroup>
 
-					<Button type="submit" variant="outline" disabled={isUploadingDoc || !uploadFile}>
+					<Button type="submit" variant="outline" disabled={isUploadingDoc || !hasUploadFile}>
 						{#if isUploadingDoc}
 							<Spinner data-icon="inline-start" />
 						{:else}
@@ -1049,12 +962,28 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<form onsubmit={handleRegisterTemplate} class="flex flex-col gap-4">
+		<form
+			method="POST"
+			action="?/registerTemplate"
+			use:enhance={() => {
+				isRegisteringTemplate = true;
+				return async ({ update }) => {
+					await update();
+					isRegisteringTemplate = false;
+				};
+			}}
+			class="flex flex-col gap-4"
+		>
+			<input type="hidden" name="template_type" value={tplType} />
+			<input type="hidden" name="format" value={tplFormat} />
+			<input type="hidden" name="docx_base64" value={tplDocxBase64} />
+
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label for="reg-tpl-name">Nom du modèle</Field.Label>
 					<Input
 						id="reg-tpl-name"
+						name="name"
 						placeholder="Bail Habitation Loi 89 Standard"
 						bind:value={tplName}
 						required
@@ -1109,6 +1038,7 @@
 						<Field.Label for="reg-tpl-html">Gabarit HTML</Field.Label>
 						<textarea
 							id="reg-tpl-html"
+							name="html_body"
 							rows="4"
 							class="w-full rounded-md border border-input bg-background p-2 font-mono text-xs"
 							bind:value={tplHtmlBody}

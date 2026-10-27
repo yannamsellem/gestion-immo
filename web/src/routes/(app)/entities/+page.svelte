@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import IconAlertTriangle from '@tabler/icons-svelte/icons/alert-triangle';
 	import IconBuildingBank from '@tabler/icons-svelte/icons/building-bank';
@@ -15,22 +16,13 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import * as Select from '#lib/components/ui/select/index.js';
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
-	import { Skeleton } from '#lib/components/ui/skeleton/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
-	import { ApiError } from '#lib/core/api/api-error';
-	import {
-		formatBasisPointsToPercent,
-		formatCentsToEuro,
-		parseEuroToCents
-	} from '#lib/core/formatters/money';
-	import { workspaceStore } from '#lib/core/workspace/workspace.svelte';
-	import type {
-		EntityPortfolioSummaryDTO,
-		EntityType,
-		LegalEntityDTO
-	} from '#lib/modules/portfolio/types';
-	import { apiRegistry } from '#lib/modules/registry';
+	import { formatBasisPointsToPercent, formatCentsToEuro } from '#lib/core/formatters/money';
+	import type { EntityType } from '#lib/modules/portfolio/types';
+	import type { PageProps } from './$types';
+
+	let { data, form }: PageProps = $props();
 
 	const ENTITY_TYPES: Array<{ value: EntityType; label: string }> = [
 		{ value: 'SCI_IS', label: 'SCI à l’IS' },
@@ -40,12 +32,6 @@
 		{ value: 'NOM_PROPRE', label: 'Détention en nom propre' }
 	];
 
-	let isLoading = $state(true);
-	let errorMessage = $state<string | null>(null);
-	let reloadCounter = $state(0);
-
-	let entities = $state<LegalEntityDTO[]>([]);
-	let summariesByEntity = $state<Record<string, EntityPortfolioSummaryDTO>>({});
 	let focusedEntityId = $state<string>('');
 
 	// Create Entity Sheet
@@ -76,69 +62,39 @@
 		}
 	});
 
+	const visibleSummaries = $derived(Object.values(data.summariesByEntity));
+	const focusedSummary = $derived(
+		data.summariesByEntity[focusedEntityId] ?? visibleSummaries[0] ?? null
+	);
+
 	$effect(() => {
-		const selectedEntityId = workspaceStore.selectedEntityId;
-		const trigger = reloadCounter;
-		void trigger;
-
-		let cancelled = false;
-		isLoading = true;
-		errorMessage = null;
-
-		void (async () => {
-			try {
-				const allEntities = await apiRegistry.portfolio.listEntities();
-				if (cancelled) return;
-				entities = allEntities;
-				workspaceStore.setEntities(allEntities);
-
-				const targetEntities =
-					selectedEntityId === 'ALL'
-						? allEntities
-						: allEntities.filter((e) => e.id === selectedEntityId);
-
-				if (targetEntities.length > 0) {
-					if (!focusedEntityId || !targetEntities.some((e) => e.id === focusedEntityId)) {
-						focusedEntityId = targetEntities[0].id;
-					}
-					if (!shEntityId) {
-						shEntityId = targetEntities[0].id;
-					}
-				} else {
-					focusedEntityId = '';
-				}
-
-				const nextSummaries: Record<string, EntityPortfolioSummaryDTO> = {};
-				await Promise.all(
-					targetEntities.map(async (entity) => {
-						const summary = await apiRegistry.portfolio.getEntitySummary(entity.id);
-						nextSummaries[entity.id] = summary;
-					})
-				);
-				if (cancelled) return;
-				summariesByEntity = nextSummaries;
-			} catch (err) {
-				if (cancelled) return;
-				errorMessage =
-					err instanceof ApiError
-						? err.message
-						: 'Impossible de charger les entités juridiques et associés.';
-			} finally {
-				if (!cancelled) {
-					isLoading = false;
-				}
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-		};
+		if (visibleSummaries.length > 0 && !focusedEntityId) {
+			focusedEntityId = visibleSummaries[0].entity.id;
+		}
+		if (visibleSummaries.length > 0 && !shEntityId) {
+			shEntityId = visibleSummaries[0].entity.id;
+		}
 	});
 
-	const visibleSummaries = $derived(Object.values(summariesByEntity));
-	const focusedSummary = $derived(
-		summariesByEntity[focusedEntityId] ?? visibleSummaries[0] ?? null
-	);
+	$effect(() => {
+		if (form?.successMessage) {
+			toast.success(form.successMessage);
+		}
+		if (form?.actionError) {
+			toast.error(form.actionError);
+		}
+		if (form?.createdEntity) {
+			createEntityOpen = false;
+			newName = '';
+			newSiret = '';
+			newAddress = '';
+			focusedEntityId = form.createdEntity.id;
+		}
+		if (form?.shareholderSaved) {
+			shareholderSheetOpen = false;
+			shFullName = '';
+		}
+	});
 
 	const totalAcquisitionCents = $derived(
 		visibleSummaries.reduce((sum, s) => sum + s.total_acquisition_cents, 0)
@@ -162,76 +118,6 @@
 		shCurrentAccountEuro = '0,00';
 		shRemunerationEuro = '0,00';
 		shareholderSheetOpen = true;
-	}
-
-	async function handleCreateEntity(event: SubmitEvent) {
-		event.preventDefault();
-		if (!newName.trim()) return;
-
-		let shareCapitalCents: number;
-		try {
-			shareCapitalCents = parseEuroToCents(newShareCapitalEuro || '0');
-		} catch {
-			toast.error('Montant du capital social invalide.');
-			return;
-		}
-
-		const totalShares = Number.parseInt(newTotalShares, 10) || 100;
-		isCreatingEntity = true;
-		try {
-			const created = await apiRegistry.portfolio.createEntity({
-				name: newName.trim(),
-				entity_type: newEntityType,
-				siret: newSiret.trim(),
-				naf_code: newNafCode.trim() || '6820B',
-				address: newAddress.trim(),
-				share_capital_cents: shareCapitalCents,
-				total_shares: totalShares
-			});
-			toast.success(`Entité « ${created.name} » créée.`);
-			createEntityOpen = false;
-			newName = '';
-			newSiret = '';
-			newAddress = '';
-			focusedEntityId = created.id;
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Échec de la création de l’entité.');
-		} finally {
-			isCreatingEntity = false;
-		}
-	}
-
-	async function handleUpsertShareholder(event: SubmitEvent) {
-		event.preventDefault();
-		if (!shEntityId || !shFullName.trim()) return;
-
-		let currentAccountCents: number;
-		let remunerationPaidCents: number;
-		try {
-			currentAccountCents = parseEuroToCents(shCurrentAccountEuro || '0');
-			remunerationPaidCents = parseEuroToCents(shRemunerationEuro || '0');
-		} catch {
-			toast.error('Montant compte courant ou rémunération invalide.');
-			return;
-		}
-
-		isSavingShareholder = true;
-		try {
-			await apiRegistry.portfolio.upsertShareholder(shEntityId, {
-				full_name: shFullName.trim(),
-				shares_count: Number.parseInt(shSharesCount, 10) || 0,
-				current_account_cents: currentAccountCents,
-				remuneration_paid_cents: remunerationPaidCents
-			});
-			toast.success('Associé enregistré (quote-part recalculée en points de base).');
-			shareholderSheetOpen = false;
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Impossible d’enregistrer l’associé.');
-		} finally {
-			isSavingShareholder = false;
-		}
 	}
 </script>
 
@@ -257,11 +143,11 @@
 	{/snippet}
 </PageHeader>
 
-{#if errorMessage}
+{#if data.errorMessage}
 	<Alert.Root variant="destructive">
 		<IconAlertTriangle class="size-4" />
 		<Alert.Title>Erreur</Alert.Title>
-		<Alert.Description>{errorMessage}</Alert.Description>
+		<Alert.Description>{data.errorMessage}</Alert.Description>
 	</Alert.Root>
 {/if}
 
@@ -313,9 +199,7 @@
 	</Card.Root>
 </div>
 
-{#if isLoading}
-	<Skeleton class="h-56 w-full" />
-{:else if visibleSummaries.length === 0}
+{#if visibleSummaries.length === 0}
 	<Card.Root>
 		<Card.Content class="py-10">
 			<Empty.Root>
@@ -482,12 +366,26 @@
 			</Sheet.Description>
 		</Sheet.Header>
 
-		<form onsubmit={handleCreateEntity} class="flex flex-col gap-4 p-4">
+		<form
+			method="POST"
+			action="?/createEntity"
+			use:enhance={() => {
+				isCreatingEntity = true;
+				return async ({ update }) => {
+					await update();
+					isCreatingEntity = false;
+				};
+			}}
+			class="flex flex-col gap-4 p-4"
+		>
+			<input type="hidden" name="entity_type" value={newEntityType} />
+
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label for="ent-name">Dénomination sociale / Nom</Field.Label>
 					<Input
 						id="ent-name"
+						name="name"
 						placeholder="SCI Patrimoine Haussmann"
 						bind:value={newName}
 						required
@@ -519,12 +417,12 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="ent-siret">N° SIRET (14 chiffres)</Field.Label>
-						<Input id="ent-siret" placeholder="89234567800014" bind:value={newSiret} />
+						<Input id="ent-siret" name="siret" placeholder="89234567800014" bind:value={newSiret} />
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="ent-naf">Code APE / NAF</Field.Label>
-						<Input id="ent-naf" placeholder="6820B" bind:value={newNafCode} />
+						<Input id="ent-naf" name="naf_code" placeholder="6820B" bind:value={newNafCode} />
 					</Field.Field>
 				</div>
 
@@ -532,6 +430,7 @@
 					<Field.Label for="ent-addr">Adresse du siège social</Field.Label>
 					<Input
 						id="ent-addr"
+						name="address"
 						placeholder="14 boulevard Haussmann, 75009 Paris"
 						bind:value={newAddress}
 						required
@@ -543,6 +442,7 @@
 						<Field.Label for="ent-cap">Capital social (€)</Field.Label>
 						<Input
 							id="ent-cap"
+							name="share_capital_euro"
 							type="text"
 							inputmode="decimal"
 							placeholder="1000,00"
@@ -553,7 +453,14 @@
 
 					<Field.Field>
 						<Field.Label for="ent-shares">Nombre total de parts</Field.Label>
-						<Input id="ent-shares" type="number" min="1" bind:value={newTotalShares} required />
+						<Input
+							id="ent-shares"
+							name="total_shares"
+							type="number"
+							min="1"
+							bind:value={newTotalShares}
+							required
+						/>
 					</Field.Field>
 				</div>
 			</Field.FieldGroup>
@@ -579,7 +486,20 @@
 			</Sheet.Description>
 		</Sheet.Header>
 
-		<form onsubmit={handleUpsertShareholder} class="flex flex-col gap-4 p-4">
+		<form
+			method="POST"
+			action="?/upsertShareholder"
+			use:enhance={() => {
+				isSavingShareholder = true;
+				return async ({ update }) => {
+					await update();
+					isSavingShareholder = false;
+				};
+			}}
+			class="flex flex-col gap-4 p-4"
+		>
+			<input type="hidden" name="legal_entity_id" value={shEntityId} />
+
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label>Entité juridique</Field.Label>
@@ -591,11 +511,11 @@
 						}}
 					>
 						<Select.Trigger class="w-full">
-							{entities.find((e) => e.id === shEntityId)?.name ?? 'Sélectionner'}
+							{data.entities.find((e) => e.id === shEntityId)?.name ?? 'Sélectionner'}
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Group>
-								{#each entities as entity (entity.id)}
+								{#each data.entities as entity (entity.id)}
 									<Select.Item value={entity.id} label={entity.name}>{entity.name}</Select.Item>
 								{/each}
 							</Select.Group>
@@ -605,23 +525,48 @@
 
 				<Field.Field>
 					<Field.Label for="sh-name">Nom complet ou raison sociale de l'associé</Field.Label>
-					<Input id="sh-name" placeholder="Jean Dupont" bind:value={shFullName} required />
+					<Input
+						id="sh-name"
+						name="full_name"
+						placeholder="Jean Dupont"
+						bind:value={shFullName}
+						required
+					/>
 				</Field.Field>
 
 				<Field.Field>
 					<Field.Label for="sh-shares">Nombre de parts détenues</Field.Label>
-					<Input id="sh-shares" type="number" min="1" bind:value={shSharesCount} required />
+					<Input
+						id="sh-shares"
+						name="shares_count"
+						type="number"
+						min="1"
+						bind:value={shSharesCount}
+						required
+					/>
 				</Field.Field>
 
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="sh-cc">Solde compte courant 455 (€)</Field.Label>
-						<Input id="sh-cc" type="text" inputmode="decimal" bind:value={shCurrentAccountEuro} />
+						<Input
+							id="sh-cc"
+							name="current_account_euro"
+							type="text"
+							inputmode="decimal"
+							bind:value={shCurrentAccountEuro}
+						/>
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="sh-rem">Rémunération versée (€)</Field.Label>
-						<Input id="sh-rem" type="text" inputmode="decimal" bind:value={shRemunerationEuro} />
+						<Input
+							id="sh-rem"
+							name="remuneration_euro"
+							type="text"
+							inputmode="decimal"
+							bind:value={shRemunerationEuro}
+						/>
 					</Field.Field>
 				</div>
 			</Field.FieldGroup>

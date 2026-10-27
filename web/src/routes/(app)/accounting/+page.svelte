@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import IconAlertTriangle from '@tabler/icons-svelte/icons/alert-triangle';
 	import IconBook from '@tabler/icons-svelte/icons/book';
 	import IconCalculator from '@tabler/icons-svelte/icons/calculator';
@@ -18,11 +20,9 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import * as Select from '#lib/components/ui/select/index.js';
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
-	import { Skeleton } from '#lib/components/ui/skeleton/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import * as Tabs from '#lib/components/ui/tabs/index.js';
-	import { ApiError } from '#lib/core/api/api-error';
 	import { formatIsoDateFr } from '#lib/core/formatters/date';
 	import {
 		formatBasisPointsToPercent,
@@ -39,28 +39,19 @@
 		AccountBalanceLineDTO,
 		AnnualAccountsReportDTO,
 		ComputedFinancialStatementsDTO,
-		JournalEntryDTO,
 		StatementSection
 	} from '#lib/modules/accounting/types';
-	import type { LegalEntityDTO } from '#lib/modules/portfolio/types';
-	import { apiRegistry } from '#lib/modules/registry';
+	import type { PageProps } from './$types';
+
+	let { data, form }: PageProps = $props();
 
 	let activeTab = $state<'statements' | 'journal'>('statements');
-	let fiscalYear = $state<number>(new Date().getFullYear());
-	let activeEntityId = $state<string>('');
 	let disabledLineIds = $state<string[]>([]);
-
-	let entities = $state<LegalEntityDTO[]>([]);
-	let statements = $state<ComputedFinancialStatementsDTO | null>(null);
-	let journalEntries = $state<JournalEntryDTO[]>([]);
+	let localStatements = $state<ComputedFinancialStatementsDTO | null>(null);
 	let generatedReport = $state<AnnualAccountsReportDTO | null>(null);
 
-	let isLoading = $state(true);
 	let isRecomputing = $state(false);
 	let isGeneratingPdf = $state(false);
-	let isExportingFec = $state(false);
-	let errorMessage = $state<string | null>(null);
-	let reloadCounter = $state(0);
 
 	// Upsert Balance Line Sheet
 	let balanceSheetOpen = $state(false);
@@ -88,80 +79,58 @@
 	let jrnCreditEuro = $state('1200,00');
 	let isSavingJournal = $state(false);
 
-	let previousContextKey = $state('');
+	let recomputeFormEl = $state<HTMLFormElement | null>(null);
 
 	$effect(() => {
-		if (workspaceStore.selectedEntityId !== 'ALL') {
-			activeEntityId = workspaceStore.selectedEntityId;
-		} else if (entities.length > 0 && !activeEntityId) {
-			activeEntityId = entities[0].id;
+		localStatements = data.statements;
+		disabledLineIds = data.disabledLineIds;
+	});
+
+	$effect(() => {
+		if (form?.successMessage) {
+			toast.success(form.successMessage);
+		}
+		if (form?.actionError) {
+			toast.error(form.actionError);
+		}
+		if (form?.recomputedStatements) {
+			localStatements = form.recomputedStatements;
+			disabledLineIds = form.disabledLineIds ?? [];
+		}
+		if (form?.generatedReport) {
+			generatedReport = form.generatedReport;
+		}
+		if (form?.balanceLineSaved) {
+			balanceSheetOpen = false;
+		}
+		if (form?.journalRecorded) {
+			journalSheetOpen = false;
 		}
 	});
 
-	$effect(() => {
-		const selectedWorkspaceEntity = workspaceStore.selectedEntityId;
-		const year = fiscalYear;
-		const trigger = reloadCounter;
-		void trigger;
+	const statements = $derived(localStatements ?? data.statements);
+	const activeEntity = $derived(data.entities.find((e) => e.id === data.activeEntityId) ?? null);
 
-		let cancelled = false;
-		isLoading = true;
-		errorMessage = null;
-
-		void (async () => {
-			try {
-				const allEntities = await apiRegistry.portfolio.listEntities();
-				if (cancelled) return;
-				entities = allEntities;
-				workspaceStore.setEntities(allEntities);
-
-				const targetEntityId =
-					selectedWorkspaceEntity !== 'ALL'
-						? selectedWorkspaceEntity
-						: activeEntityId || allEntities[0]?.id || '';
-
-				if (!targetEntityId) {
-					statements = null;
-					journalEntries = [];
-					return;
-				}
-				activeEntityId = targetEntityId;
-
-				const contextKey = `${targetEntityId}:${year}`;
-				let currentDisabled = disabledLineIds;
-				if (previousContextKey !== contextKey) {
-					previousContextKey = contextKey;
-					disabledLineIds = [];
-					currentDisabled = [];
-				}
-
-				const [preview, entries] = await Promise.all([
-					apiRegistry.accounting.previewStatements(targetEntityId, year, currentDisabled),
-					apiRegistry.accounting.listJournalEntries(targetEntityId, year)
-				]);
-				if (cancelled) return;
-
-				statements = preview;
-				journalEntries = entries;
-			} catch (err) {
-				if (cancelled) return;
-				errorMessage =
-					err instanceof ApiError
-						? err.message
-						: 'Impossible de charger les états financiers et le journal comptable.';
-			} finally {
-				if (!cancelled) {
-					isLoading = false;
-				}
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-		};
+	const existingBalanceLinesJson = $derived.by(() => {
+		const lines: AccountBalanceLineDTO[] = (statements?.lines ?? []).map((line) => ({
+			line_id: line.line_id,
+			account_code: line.account_code,
+			label: line.label,
+			section: line.section,
+			cerfa_code: line.cerfa_code,
+			gross_n_cents: line.gross_n_cents,
+			depreciation_n_cents: line.depreciation_n_cents,
+			net_n_cents: line.net_n_cents,
+			net_n_minus_1_cents: line.net_n_minus_1_cents
+		}));
+		return JSON.stringify(lines);
 	});
 
-	const activeEntity = $derived(entities.find((e) => e.id === activeEntityId) ?? null);
+	const fecExportHref = $derived.by(() => {
+		if (!data.activeEntityId) return '';
+		const siren = (activeEntity?.siret ?? '000000000').slice(0, 9) || '000000000';
+		return `${resolve('/(app)/accounting')}/fec?entityId=${encodeURIComponent(data.activeEntityId)}&fiscalYear=${data.fiscalYear}&siren=${encodeURIComponent(siren)}`;
+	});
 
 	const journalBalanceCheck = $derived.by(() => {
 		try {
@@ -177,184 +146,44 @@
 		}
 	});
 
-	async function handleToggleStatementLine(lineId: string) {
-		if (!activeEntityId) return;
-		const nextDisabled = toggleDisabledLineId(disabledLineIds, lineId);
-		disabledLineIds = nextDisabled;
-		isRecomputing = true;
-		try {
-			statements = await apiRegistry.accounting.previewStatements(
-				activeEntityId,
-				fiscalYear,
-				nextDisabled
-			);
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Erreur lors du recalcul interactif.');
-		} finally {
-			isRecomputing = false;
-		}
-	}
-
-	async function handleGeneratePdf() {
-		if (!activeEntityId) return;
-		isGeneratingPdf = true;
-		try {
-			const report = await apiRegistry.accounting.generateAnnualAccountsPdf(
-				activeEntityId,
-				fiscalYear,
-				disabledLineIds
-			);
-			generatedReport = report;
-			toast.success(`Plaquette des comptes annuels ${fiscalYear} générée.`);
-		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Échec de la génération du PDF des comptes annuels.'
-			);
-		} finally {
-			isGeneratingPdf = false;
-		}
-	}
-
-	async function handleExportFec() {
-		if (!activeEntityId) return;
-		isExportingFec = true;
-		try {
-			const tsvContent = await apiRegistry.accounting.exportFecTsv(activeEntityId, fiscalYear);
-			const blob = new Blob([tsvContent], { type: 'text/tab-separated-values;charset=utf-8' });
-			const url = URL.createObjectURL(blob);
-			const anchor = document.createElement('a');
-			const siren = (activeEntity?.siret ?? '000000000').slice(0, 9) || '000000000';
-			anchor.href = url;
-			anchor.download = `${siren}FEC${fiscalYear}1231.tsv`;
-			document.body.appendChild(anchor);
-			anchor.click();
-			document.body.removeChild(anchor);
-			URL.revokeObjectURL(url);
-			toast.success('Export normatif DGFiP FEC (18 colonnes TSV) téléchargé.');
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Échec de l’export FEC.');
-		} finally {
-			isExportingFec = false;
-		}
-	}
-
-	async function handleUpsertBalanceLine(event: SubmitEvent) {
-		event.preventDefault();
-		if (!activeEntityId || !balAccountCode.trim() || !balLabel.trim()) return;
-
-		let netNCents: number;
-		let netNMinus1Cents: number;
-		try {
-			netNCents = parseEuroToCents(balNetNEuro || '0');
-			netNMinus1Cents = parseEuroToCents(balNetNMinus1Euro || '0');
-		} catch {
-			toast.error('Montant N ou N-1 invalide.');
-			return;
-		}
-
-		const existingLines: AccountBalanceLineDTO[] = (statements?.lines ?? []).map((line) => ({
-			line_id: line.line_id,
-			account_code: line.account_code,
-			label: line.label,
-			section: line.section,
-			cerfa_code: line.cerfa_code,
-			gross_n_cents: line.gross_n_cents,
-			depreciation_n_cents: line.depreciation_n_cents,
-			net_n_cents: line.net_n_cents,
-			net_n_minus_1_cents: line.net_n_minus_1_cents
-		}));
-
-		const lineId = `line_${balAccountCode.trim()}`;
-		const filtered = existingLines.filter((l) => l.line_id !== lineId);
-		const nextLines: AccountBalanceLineDTO[] = [
-			...filtered,
-			{
-				line_id: lineId,
-				account_code: balAccountCode.trim(),
-				label: balLabel.trim(),
-				section: balSection,
-				cerfa_code: balCerfaCode.trim() || undefined,
-				gross_n_cents: netNCents,
-				depreciation_n_cents: 0,
-				net_n_cents: netNCents,
-				net_n_minus_1_cents: netNMinus1Cents
-			}
-		];
-
-		isSavingBalanceLine = true;
-		try {
-			await apiRegistry.accounting.upsertBalanceLines(activeEntityId, fiscalYear, nextLines);
-			toast.success('Ligne de balance enregistrée et états financiers recalculés.');
-			balanceSheetOpen = false;
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Erreur lors de la mise à jour.');
-		} finally {
-			isSavingBalanceLine = false;
-		}
-	}
-
-	async function handleRecordJournalEntry(event: SubmitEvent) {
-		event.preventDefault();
-		if (!activeEntityId || !journalBalanceCheck.balanced) {
-			toast.error('L’écriture doit être équilibrée (Total Débit = Total Crédit > 0).');
-			return;
-		}
-
-		isSavingJournal = true;
-		try {
-			await apiRegistry.accounting.recordJournalEntry(activeEntityId, {
-				fiscal_year: fiscalYear,
-				journal_code: jrnCode.trim() || 'OD',
-				journal_label: jrnLabel.trim() || 'Opérations diverses',
-				document_ref: jrnDocRef.trim() || `PIECE-${Date.now()}`,
-				label: jrnEntryLabel.trim(),
-				lines: [
-					{
-						line_id: `jrn_${jrnDebitAccount.trim()}`,
-						account_code: jrnDebitAccount.trim(),
-						account_label: jrnDebitAccountLabel.trim(),
-						section: jrnDebitSection,
-						label: jrnEntryLabel.trim(),
-						debit_cents: journalBalanceCheck.debitCents,
-						credit_cents: 0
-					},
-					{
-						line_id: `jrn_${jrnCreditAccount.trim()}`,
-						account_code: jrnCreditAccount.trim(),
-						account_label: jrnCreditAccountLabel.trim(),
-						section: jrnCreditSection,
-						label: jrnEntryLabel.trim(),
-						debit_cents: 0,
-						credit_cents: journalBalanceCheck.creditCents
-					}
-				]
-			});
-			toast.success('Écriture comptable en partie double validée.');
-			journalSheetOpen = false;
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Impossible d’enregistrer l’écriture comptable.'
-			);
-		} finally {
-			isSavingJournal = false;
-		}
+	function handleToggleStatementLine(lineId: string) {
+		disabledLineIds = toggleDisabledLineId(disabledLineIds, lineId);
+		queueMicrotask(() => {
+			recomputeFormEl?.requestSubmit();
+		});
 	}
 </script>
+
+<!-- Hidden form for interactive SSR statement line toggle -->
+<form
+	bind:this={recomputeFormEl}
+	method="POST"
+	action="?/recompute"
+	use:enhance={() => {
+		isRecomputing = true;
+		return async ({ update }) => {
+			await update({ reset: false });
+			isRecomputing = false;
+		};
+	}}
+	class="hidden"
+>
+	<input type="hidden" name="entity_id" value={data.activeEntityId} />
+	<input type="hidden" name="fiscal_year" value={data.fiscalYear} />
+	<input type="hidden" name="disabled_line_ids_json" value={JSON.stringify(disabledLineIds)} />
+</form>
 
 <PageHeader
 	title="Comptes Annuels Interactifs, Liasse 2072/2033 & Export FEC"
 	subtitle="Simulation en temps réel (activation/désactivation de lignes type amortissements), génération PDF et export DGFiP 18 colonnes"
 >
 	{#snippet actions()}
-		{#if entities.length > 0}
+		{#if data.entities.length > 0}
 			<Select.Root
 				type="single"
-				value={activeEntityId}
+				value={data.activeEntityId}
 				onValueChange={(v) => {
 					if (v) {
-						activeEntityId = v;
 						workspaceStore.setEntityId(v);
 					}
 				}}
@@ -364,7 +193,7 @@
 				</Select.Trigger>
 				<Select.Content>
 					<Select.Group>
-						{#each entities as entity (entity.id)}
+						{#each data.entities as entity (entity.id)}
 							<Select.Item value={entity.id} label={entity.name}>{entity.name}</Select.Item>
 						{/each}
 					</Select.Group>
@@ -372,49 +201,63 @@
 			</Select.Root>
 		{/if}
 
-		<Input
-			type="number"
-			min="2000"
-			max="2100"
-			value={String(fiscalYear)}
-			onchange={(e) => {
-				const parsed = Number.parseInt((e.currentTarget as HTMLInputElement).value, 10);
-				if (!Number.isNaN(parsed)) fiscalYear = parsed;
-			}}
-			class="h-8 w-24 font-mono"
-			aria-label="Exercice fiscal"
-		/>
+		<form method="GET">
+			<Input
+				type="number"
+				name="year"
+				min="2000"
+				max="2100"
+				value={String(data.fiscalYear)}
+				onchange={(e) => {
+					const input = e.currentTarget as HTMLInputElement;
+					const parsed = Number.parseInt(input.value, 10);
+					if (!Number.isNaN(parsed)) {
+						input.form?.requestSubmit();
+					}
+				}}
+				class="h-8 w-24 font-mono"
+				aria-label="Exercice fiscal"
+			/>
+		</form>
 
-		<Button
-			size="sm"
-			variant="outline"
-			onclick={handleExportFec}
-			disabled={isExportingFec || !activeEntityId}
-		>
-			{#if isExportingFec}
-				<Spinner data-icon="inline-start" />
-			{:else}
+		{#if fecExportHref}
+			<Button size="sm" variant="outline" href={fecExportHref}>
 				<IconFileExport data-icon="inline-start" />
-			{/if}
-			Export FEC (.tsv)
-		</Button>
+				Export FEC (.tsv)
+			</Button>
+		{/if}
 
-		<Button size="sm" onclick={handleGeneratePdf} disabled={isGeneratingPdf || !activeEntityId}>
-			{#if isGeneratingPdf}
-				<Spinner data-icon="inline-start" />
-			{:else}
-				<IconFileText data-icon="inline-start" />
-			{/if}
-			Générer Plaquette PDF
-		</Button>
+		<form
+			method="POST"
+			action="?/generatePdf"
+			use:enhance={() => {
+				isGeneratingPdf = true;
+				return async ({ update }) => {
+					await update({ reset: false });
+					isGeneratingPdf = false;
+				};
+			}}
+		>
+			<input type="hidden" name="entity_id" value={data.activeEntityId} />
+			<input type="hidden" name="fiscal_year" value={data.fiscalYear} />
+			<input type="hidden" name="disabled_line_ids_json" value={JSON.stringify(disabledLineIds)} />
+			<Button type="submit" size="sm" disabled={isGeneratingPdf || !data.activeEntityId}>
+				{#if isGeneratingPdf}
+					<Spinner data-icon="inline-start" />
+				{:else}
+					<IconFileText data-icon="inline-start" />
+				{/if}
+				Générer Plaquette PDF
+			</Button>
+		</form>
 	{/snippet}
 </PageHeader>
 
-{#if errorMessage}
+{#if data.errorMessage}
 	<Alert.Root variant="destructive">
 		<IconAlertTriangle class="size-4" />
 		<Alert.Title>Erreur</Alert.Title>
-		<Alert.Description>{errorMessage}</Alert.Description>
+		<Alert.Description>{data.errorMessage}</Alert.Description>
 	</Alert.Root>
 {/if}
 
@@ -453,7 +296,7 @@
 				Bilan, Compte de Résultat & SIG ({statements?.lines.length ?? 0} postes)
 			</Tabs.Trigger>
 			<Tabs.Trigger value="journal">
-				Journal Comptable PCG ({journalEntries.length} écritures)
+				Journal Comptable PCG ({data.journalEntries.length} écritures)
 			</Tabs.Trigger>
 		</Tabs.List>
 
@@ -471,9 +314,7 @@
 
 	<!-- Tab 1: Interactive Financial Statements -->
 	<Tabs.Content value="statements" class="mt-4 flex flex-col gap-6">
-		{#if isLoading}
-			<Skeleton class="h-64 w-full" />
-		{:else if !statements}
+		{#if !statements}
 			<Card.Root>
 				<Card.Content class="py-10">
 					<Empty.Root>
@@ -558,7 +399,7 @@
 				>
 					<div>
 						<Card.Title class="text-sm font-semibold">
-							Postes du Bilan & Compte de Résultat — Exercice {fiscalYear}
+							Postes du Bilan & Compte de Résultat — Exercice {data.fiscalYear}
 						</Card.Title>
 						<Card.Description>
 							Décochez une ligne (ex: Dotations aux amortissements 6811) pour recalculer
@@ -578,8 +419,8 @@
 				<Card.Content class="p-0">
 					{#if statements.lines.length === 0}
 						<p class="px-4 py-6 text-xs text-muted-foreground">
-							Aucun poste de balance ou écriture comptable sur l'exercice {fiscalYear}. Cliquez sur
-							« Ligne de balance » ou « Nouvelle écriture OD/PCG » pour alimenter les états.
+							Aucun poste de balance ou écriture comptable sur l'exercice {data.fiscalYear}. Cliquez
+							sur « Ligne de balance » ou « Nouvelle écriture OD/PCG » pour alimenter les états.
 						</p>
 					{:else}
 						<Table.Root>
@@ -589,8 +430,8 @@
 									<Table.Head>Compte PCG</Table.Head>
 									<Table.Head>Intitulé du poste</Table.Head>
 									<Table.Head>Rubrique & CERFA</Table.Head>
-									<Table.Head class="text-right">Net {fiscalYear}</Table.Head>
-									<Table.Head class="text-right">Net {fiscalYear - 1}</Table.Head>
+									<Table.Head class="text-right">Net {data.fiscalYear}</Table.Head>
+									<Table.Head class="text-right">Net {data.fiscalYear - 1}</Table.Head>
 									<Table.Head class="pr-4 text-right">Variation</Table.Head>
 								</Table.Row>
 							</Table.Header>
@@ -647,7 +488,7 @@
 		<Card.Root>
 			<Card.Header class="border-b pb-3">
 				<Card.Title class="text-sm font-semibold">
-					Livre-Journal PCG (Écritures validées {fiscalYear})
+					Livre-Journal PCG (Écritures validées {data.fiscalYear})
 				</Card.Title>
 				<Card.Description>
 					Toutes les écritures validées ci-dessous sont exportées au format normatif DGFiP FEC (18
@@ -655,9 +496,9 @@
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="p-0">
-				{#if journalEntries.length === 0}
+				{#if data.journalEntries.length === 0}
 					<p class="px-4 py-6 text-xs text-muted-foreground">
-						Aucune écriture comptable enregistrée pour l'exercice {fiscalYear}.
+						Aucune écriture comptable enregistrée pour l'exercice {data.fiscalYear}.
 					</p>
 				{:else}
 					<Table.Root>
@@ -672,7 +513,7 @@
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
-							{#each journalEntries as entry (entry.id)}
+							{#each data.journalEntries as entry (entry.id)}
 								<Table.Row>
 									<Table.Cell class="pl-4 text-xs">
 										<span class="font-medium">{formatIsoDateFr(entry.entry_date)}</span>
@@ -723,27 +564,54 @@
 			<Sheet.Title>Ajouter / modifier un poste de balance</Sheet.Title>
 			<Sheet.Description>
 				Alimentez un compte PCG (ex: 706000 Loyers, 681100 Amortissements, 213000 Immeubles) pour
-				l'exercice {fiscalYear}.
+				l'exercice {data.fiscalYear}.
 			</Sheet.Description>
 		</Sheet.Header>
 
-		<form onsubmit={handleUpsertBalanceLine} class="flex flex-col gap-4 p-4">
+		<form
+			method="POST"
+			action="?/upsertBalanceLine"
+			use:enhance={() => {
+				isSavingBalanceLine = true;
+				return async ({ update }) => {
+					await update();
+					isSavingBalanceLine = false;
+				};
+			}}
+			class="flex flex-col gap-4 p-4"
+		>
+			<input type="hidden" name="entity_id" value={data.activeEntityId} />
+			<input type="hidden" name="fiscal_year" value={data.fiscalYear} />
+			<input type="hidden" name="existing_lines_json" value={existingBalanceLinesJson} />
+			<input type="hidden" name="section" value={balSection} />
+
 			<Field.FieldGroup>
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="bal-code">N° de compte PCG</Field.Label>
-						<Input id="bal-code" class="font-mono" bind:value={balAccountCode} required />
+						<Input
+							id="bal-code"
+							name="account_code"
+							class="font-mono"
+							bind:value={balAccountCode}
+							required
+						/>
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="bal-cerfa">Case CERFA (2072 / 2033)</Field.Label>
-						<Input id="bal-cerfa" placeholder="2072-R1 / 2033-A" bind:value={balCerfaCode} />
+						<Input
+							id="bal-cerfa"
+							name="cerfa_code"
+							placeholder="2072-R1 / 2033-A"
+							bind:value={balCerfaCode}
+						/>
 					</Field.Field>
 				</div>
 
 				<Field.Field>
 					<Field.Label for="bal-label">Intitulé du compte</Field.Label>
-					<Input id="bal-label" bind:value={balLabel} required />
+					<Input id="bal-label" name="label" bind:value={balLabel} required />
 				</Field.Field>
 
 				<Field.Field>
@@ -770,14 +638,22 @@
 
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
-						<Field.Label for="bal-n">Montant Net {fiscalYear} (€)</Field.Label>
-						<Input id="bal-n" type="text" inputmode="decimal" bind:value={balNetNEuro} required />
+						<Field.Label for="bal-n">Montant Net {data.fiscalYear} (€)</Field.Label>
+						<Input
+							id="bal-n"
+							name="net_n_euro"
+							type="text"
+							inputmode="decimal"
+							bind:value={balNetNEuro}
+							required
+						/>
 					</Field.Field>
 
 					<Field.Field>
-						<Field.Label for="bal-n1">Montant Net {fiscalYear - 1} (€)</Field.Label>
+						<Field.Label for="bal-n1">Montant Net {data.fiscalYear - 1} (€)</Field.Label>
 						<Input
 							id="bal-n1"
+							name="net_n_minus_1_euro"
 							type="text"
 							inputmode="decimal"
 							bind:value={balNetNMinus1Euro}
@@ -807,45 +683,88 @@
 			</Sheet.Description>
 		</Sheet.Header>
 
-		<form onsubmit={handleRecordJournalEntry} class="flex flex-col gap-4 p-4">
+		<form
+			method="POST"
+			action="?/recordJournalEntry"
+			use:enhance={() => {
+				isSavingJournal = true;
+				return async ({ update }) => {
+					await update();
+					isSavingJournal = false;
+				};
+			}}
+			class="flex flex-col gap-4 p-4"
+		>
+			<input type="hidden" name="entity_id" value={data.activeEntityId} />
+			<input type="hidden" name="fiscal_year" value={data.fiscalYear} />
+			<input type="hidden" name="debit_section" value={jrnDebitSection} />
+			<input type="hidden" name="credit_section" value={jrnCreditSection} />
+
 			<Field.FieldGroup>
 				<div class="grid gap-3 sm:grid-cols-3">
 					<Field.Field>
 						<Field.Label for="jrn-code">Code journal</Field.Label>
-						<Input id="jrn-code" bind:value={jrnCode} required />
+						<Input id="jrn-code" name="journal_code" bind:value={jrnCode} required />
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="jrn-lbl">Libellé journal</Field.Label>
-						<Input id="jrn-lbl" bind:value={jrnLabel} required />
+						<Input id="jrn-lbl" name="journal_label" bind:value={jrnLabel} required />
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="jrn-ref">Réf. pièce</Field.Label>
-						<Input id="jrn-ref" bind:value={jrnDocRef} required />
+						<Input id="jrn-ref" name="document_ref" bind:value={jrnDocRef} required />
 					</Field.Field>
 				</div>
 
 				<Field.Field>
 					<Field.Label for="jrn-entry-lbl">Libellé de l'écriture</Field.Label>
-					<Input id="jrn-entry-lbl" bind:value={jrnEntryLabel} required />
+					<Input id="jrn-entry-lbl" name="entry_label" bind:value={jrnEntryLabel} required />
 				</Field.Field>
 
 				<div class="rounded-md border p-3">
 					<span class="text-xs font-semibold uppercase">Ligne au Débit</span>
 					<div class="mt-2 grid gap-2 sm:grid-cols-3">
-						<Input placeholder="Compte (681100)" bind:value={jrnDebitAccount} required />
-						<Input placeholder="Libellé compte" bind:value={jrnDebitAccountLabel} required />
-						<Input placeholder="Montant €" inputmode="decimal" bind:value={jrnDebitEuro} required />
+						<Input
+							name="debit_account"
+							placeholder="Compte (681100)"
+							bind:value={jrnDebitAccount}
+							required
+						/>
+						<Input
+							name="debit_account_label"
+							placeholder="Libellé compte"
+							bind:value={jrnDebitAccountLabel}
+							required
+						/>
+						<Input
+							name="debit_euro"
+							placeholder="Montant €"
+							inputmode="decimal"
+							bind:value={jrnDebitEuro}
+							required
+						/>
 					</div>
 				</div>
 
 				<div class="rounded-md border p-3">
 					<span class="text-xs font-semibold uppercase">Ligne au Crédit</span>
 					<div class="mt-2 grid gap-2 sm:grid-cols-3">
-						<Input placeholder="Compte (281300)" bind:value={jrnCreditAccount} required />
-						<Input placeholder="Libellé compte" bind:value={jrnCreditAccountLabel} required />
 						<Input
+							name="credit_account"
+							placeholder="Compte (281300)"
+							bind:value={jrnCreditAccount}
+							required
+						/>
+						<Input
+							name="credit_account_label"
+							placeholder="Libellé compte"
+							bind:value={jrnCreditAccountLabel}
+							required
+						/>
+						<Input
+							name="credit_euro"
 							placeholder="Montant €"
 							inputmode="decimal"
 							bind:value={jrnCreditEuro}

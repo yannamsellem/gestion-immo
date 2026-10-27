@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import IconBuildingBank from '@tabler/icons-svelte/icons/building-bank';
@@ -11,19 +11,19 @@
 	import IconLogout from '@tabler/icons-svelte/icons/logout';
 	import IconReceiptEuro from '@tabler/icons-svelte/icons/receipt-euro';
 	import IconShieldLock from '@tabler/icons-svelte/icons/shield-lock';
-	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Sidebar from '#lib/components/ui/sidebar/index.js';
-	import { authStore } from '#lib/modules/auth/auth-store.svelte';
+	import type { UserDTO } from '#lib/modules/auth/types';
 	import type { LegalEntityDTO } from '#lib/modules/portfolio/types';
-	import { apiRegistry } from '#lib/modules/registry';
 	import EntityWorkspaceSwitcher from './EntityWorkspaceSwitcher.svelte';
 
 	let {
+		user = null,
 		entities = [],
 		pendingRentTasksCount = 0,
 		openIncidentsCount = 0
 	}: {
+		user?: UserDTO | null;
 		entities?: LegalEntityDTO[];
 		pendingRentTasksCount?: number;
 		openIncidentsCount?: number;
@@ -86,29 +86,13 @@
 		}
 		return currentPath === href || currentPath.startsWith(`${href}/`);
 	}
-
-	async function handleLogout(): Promise<void> {
-		const refreshToken = authStore.refreshToken;
-		if (refreshToken) {
-			try {
-				await apiRegistry.auth.logout(refreshToken);
-			} catch {
-				// Proceed with local session cleanup even if backend token already expired
-			}
-		}
-		authStore.clearSession();
-		await goto(resolve('/(auth)/login'));
-	}
 </script>
 
 <Sidebar.Root collapsible="offcanvas">
 	<Sidebar.Header class="gap-3 border-b p-3">
-		<div class="flex items-center justify-between px-1">
-			<div class="flex flex-col">
-				<span class="text-sm font-semibold tracking-tight">Gestion Immo</span>
-				<span class="text-[11px] text-muted-foreground">Back-office Patrimonial</span>
-			</div>
-			<Badge variant="secondary">Svelte 5</Badge>
+		<div class="flex flex-col px-1">
+			<span class="text-sm font-semibold tracking-tight">Gestion Immo</span>
+			<span class="text-[11px] text-muted-foreground">Back-office Patrimonial</span>
 		</div>
 		<EntityWorkspaceSwitcher {entities} />
 	</Sidebar.Header>
@@ -141,17 +125,19 @@
 	</Sidebar.Content>
 
 	<Sidebar.Footer class="border-t p-3">
-		{#if authStore.user}
+		{#if user}
 			<div class="flex items-center justify-between gap-2">
 				<div class="flex min-w-0 flex-col">
-					<span class="truncate text-xs font-medium">{authStore.user.full_name}</span>
+					<span class="truncate text-xs font-medium">{user.full_name}</span>
 					<span class="truncate text-[11px] text-muted-foreground">
-						{authStore.user.email} · {authStore.user.role}
+						{user.email} · {user.role}
 					</span>
 				</div>
-				<Button variant="ghost" size="icon-sm" onclick={handleLogout} aria-label="Se déconnecter">
-					<IconLogout />
-				</Button>
+				<form method="POST" action={resolve('/(auth)/logout')} use:enhance>
+					<Button type="submit" variant="ghost" size="icon-sm" aria-label="Se déconnecter">
+						<IconLogout />
+					</Button>
+				</form>
 			</div>
 		{/if}
 	</Sidebar.Footer>

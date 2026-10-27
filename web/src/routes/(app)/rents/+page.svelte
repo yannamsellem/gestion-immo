@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import IconAlertTriangle from '@tabler/icons-svelte/icons/alert-triangle';
 	import IconBuildingBank from '@tabler/icons-svelte/icons/building-bank';
@@ -18,18 +19,18 @@
 	import * as Field from '#lib/components/ui/field/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import * as Select from '#lib/components/ui/select/index.js';
-	import { Skeleton } from '#lib/components/ui/skeleton/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import * as ToggleGroup from '#lib/components/ui/toggle-group/index.js';
-	import { ApiError } from '#lib/core/api/api-error';
-	import { formatIsoDateFr, formatPeriodMonthFr } from '#lib/core/formatters/date';
-	import { formatCentsToEuro, parseEuroToCents } from '#lib/core/formatters/money';
+	import { formatIsoDateFr } from '#lib/core/formatters/date';
+	import { formatCentsToEuro } from '#lib/core/formatters/money';
 	import { workspaceStore } from '#lib/core/workspace/workspace.svelte';
-	import type { LeaseDTO, RentCallDTO, TenantDTO } from '#lib/modules/lease/types';
-	import type { CashJournalEntryDTO, NegativePositionDTO } from '#lib/modules/payment/types';
-	import type { LegalEntityDTO, PropertyDTO } from '#lib/modules/portfolio/types';
-	import { apiRegistry } from '#lib/modules/registry';
+	import type { LeaseDTO, RentCallDTO } from '#lib/modules/lease/types';
+	import type { NegativePositionDTO } from '#lib/modules/payment/types';
+	import type { LegalEntityDTO } from '#lib/modules/portfolio/types';
+	import type { PageProps } from './$types';
+
+	let { data, form }: PageProps = $props();
 
 	type RentStatusFilter = 'ALL' | 'TO_COLLECT' | 'OVERDUE' | 'PAID';
 
@@ -48,18 +49,6 @@
 	}
 
 	let statusFilter = $state<RentStatusFilter>('ALL');
-	let isLoading = $state(true);
-	let errorMessage = $state<string | null>(null);
-	let reloadCounter = $state(0);
-
-	let entities = $state<LegalEntityDTO[]>([]);
-	let propertiesByEntity = $state<Record<string, PropertyDTO[]>>({});
-	let leases = $state<LeaseDTO[]>([]);
-	let tenants = $state<TenantDTO[]>([]);
-	let rentCallsByEntity = $state<Record<string, RentCallDTO[]>>({});
-	let negativePositionsByEntity = $state<Record<string, NegativePositionDTO[]>>({});
-	let cashJournalByEntity = $state<Record<string, CashJournalEntryDTO[]>>({});
-
 	let isGeneratingCalls = $state(false);
 
 	// Sheet state
@@ -82,98 +71,39 @@
 	let depositDate = $state(new Date().toISOString().slice(0, 10));
 	let isSubmittingDeposit = $state(false);
 
-	// Sync URL entityId parameter into workspaceStore
 	$effect(() => {
-		const urlEntityId = page.url.searchParams.get('entityId');
-		if (urlEntityId && urlEntityId !== workspaceStore.selectedEntityId) {
-			workspaceStore.setEntityId(urlEntityId);
+		if (data.entities.length > 0) {
+			const defaultEntityId =
+				workspaceStore.selectedEntityId !== 'ALL'
+					? workspaceStore.selectedEntityId
+					: data.entities[0].id;
+			if (!csvTargetEntityId) csvTargetEntityId = defaultEntityId;
+			if (!depositEntityId) depositEntityId = defaultEntityId;
 		}
 	});
 
-	// Load data for the selected workspace & period
 	$effect(() => {
-		const selectedEntityId = workspaceStore.selectedEntityId;
-		const periodMonth = workspaceStore.selectedPeriodMonth;
-		const trigger = reloadCounter;
-		void trigger;
-
-		let cancelled = false;
-		isLoading = true;
-		errorMessage = null;
-
-		void (async () => {
-			try {
-				const allEntities = await apiRegistry.portfolio.listEntities();
-				if (cancelled) return;
-				entities = allEntities;
-				workspaceStore.setEntities(allEntities);
-
-				const targetEntities =
-					selectedEntityId === 'ALL'
-						? allEntities
-						: allEntities.filter((item) => item.id === selectedEntityId);
-
-				if (targetEntities.length > 0) {
-					if (!csvTargetEntityId) csvTargetEntityId = targetEntities[0].id;
-					if (!depositEntityId) depositEntityId = targetEntities[0].id;
-				}
-
-				const [loadedLeases, loadedTenants] = await Promise.all([
-					apiRegistry.lease.listLeases(selectedEntityId),
-					apiRegistry.lease.listTenants(true)
-				]);
-				if (cancelled) return;
-
-				const nextProps: Record<string, PropertyDTO[]> = {};
-				const nextCalls: Record<string, RentCallDTO[]> = {};
-				const nextNegatives: Record<string, NegativePositionDTO[]> = {};
-				const nextCash: Record<string, CashJournalEntryDTO[]> = {};
-
-				await Promise.all(
-					targetEntities.map(async (entity) => {
-						const [props, calls, negatives, cashEntries] = await Promise.all([
-							apiRegistry.portfolio.listProperties(entity.id),
-							apiRegistry.lease.listEntityRentCalls(entity.id, periodMonth),
-							apiRegistry.payment.listNegativePositions(entity.id).catch(() => []),
-							apiRegistry.payment.listCashJournal(entity.id).catch(() => [])
-						]);
-						nextProps[entity.id] = props;
-						nextCalls[entity.id] = calls;
-						nextNegatives[entity.id] = negatives;
-						nextCash[entity.id] = cashEntries;
-					})
-				);
-				if (cancelled) return;
-
-				leases = loadedLeases.filter((lease) => lease.active);
-				tenants = loadedTenants;
-				propertiesByEntity = nextProps;
-				rentCallsByEntity = nextCalls;
-				negativePositionsByEntity = nextNegatives;
-				cashJournalByEntity = nextCash;
-			} catch (err) {
-				if (cancelled) return;
-				errorMessage =
-					err instanceof ApiError
-						? err.message
-						: 'Impossible de charger les appels de loyers et encaissements.';
-			} finally {
-				if (!cancelled) {
-					isLoading = false;
-				}
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-		};
+		if (form?.successMessage) {
+			toast.success(form.successMessage);
+		}
+		if (form?.actionError) {
+			toast.error(form.actionError);
+		}
+		if (form?.csvImported) {
+			csvDialogOpen = false;
+			csvRawContent = '';
+		}
+		if (form?.depositRecorded) {
+			depositDialogOpen = false;
+			depositAmountEuro = '';
+		}
 	});
 
 	const unifiedRows = $derived.by((): UnifiedRentRow[] => {
-		const entityMap = new Map(entities.map((entity) => [entity.id, entity]));
-		const tenantMap = new Map(tenants.map((tenant) => [tenant.id, tenant]));
+		const entityMap = new Map(data.entities.map((entity) => [entity.id, entity]));
+		const tenantMap = new Map(data.tenants.map((tenant) => [tenant.id, tenant]));
 		const lotLabelMap = new Map<string, string>(
-			Object.values(propertiesByEntity).flatMap((propList) =>
+			Object.values(data.propertiesByEntity).flatMap((propList) =>
 				propList.flatMap((prop) =>
 					(prop.lots ?? []).map((lot) => [lot.id, `${prop.label} — ${lot.label}`] as const)
 				)
@@ -181,7 +111,7 @@
 		);
 
 		const rentCallByLeaseId = new Map<string, RentCallDTO>(
-			Object.values(rentCallsByEntity).flatMap((callList) =>
+			Object.values(data.rentCallsByEntity).flatMap((callList) =>
 				callList
 					.filter((rc) => rc.period_month === workspaceStore.selectedPeriodMonth)
 					.map((rc) => [rc.lease_id, rc] as const)
@@ -189,12 +119,12 @@
 		);
 
 		const negativeByLeaseId = new Map<string, NegativePositionDTO>(
-			Object.values(negativePositionsByEntity).flatMap((negList) =>
+			Object.values(data.negativePositionsByEntity).flatMap((negList) =>
 				negList.map((neg) => [neg.lease_id, neg] as const)
 			)
 		);
 
-		return leases
+		return data.leases
 			.filter(
 				(lease) =>
 					workspaceStore.selectedEntityId === 'ALL' ||
@@ -210,7 +140,6 @@
 					address: '',
 					share_capital_cents: 0,
 					total_shares: 0,
-					shareholders: [],
 					created_at: '',
 					updated_at: ''
 				};
@@ -277,14 +206,14 @@
 	const selectedRow = $derived(unifiedRows.find((row) => row.lease.id === selectedLeaseId) ?? null);
 
 	const allCashEntries = $derived(
-		Object.values(cashJournalByEntity)
+		Object.values(data.cashJournalByEntity)
 			.flat()
 			.sort((a, b) => b.entry_date.localeCompare(a.entry_date))
 	);
 
 	// Auto-open contextual Sheet when arriving from Cockpit CTA query params
 	$effect(() => {
-		if (isLoading || unifiedRows.length === 0) return;
+		if (unifiedRows.length === 0) return;
 
 		const urlLeaseId = page.url.searchParams.get('leaseId');
 		const urlRentCallId = page.url.searchParams.get('rentCallId');
@@ -315,106 +244,11 @@
 		sheetOpen = true;
 	}
 
-	async function handleGenerateMonthlyCalls() {
-		const targetEntities =
-			workspaceStore.selectedEntityId === 'ALL'
-				? entities
-				: entities.filter((item) => item.id === workspaceStore.selectedEntityId);
-
-		if (targetEntities.length === 0) {
-			toast.error('Aucune entité sélectionnée.');
-			return;
-		}
-
-		isGeneratingCalls = true;
-		try {
-			let generatedCount = 0;
-			for (const entity of targetEntities) {
-				const calls = await apiRegistry.lease.generateRentCalls(
-					entity.id,
-					workspaceStore.selectedPeriodMonth
-				);
-				generatedCount += calls.length;
-			}
-			toast.success(
-				`${generatedCount} appel(s) de loyer généré(s) pour ${formatPeriodMonthFr(workspaceStore.selectedPeriodMonth)}.`
-			);
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Erreur lors de la génération des appels de loyers.'
-			);
-		} finally {
-			isGeneratingCalls = false;
-		}
-	}
-
 	async function handleCsvFileChange(event: Event) {
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		if (!file) return;
 		csvRawContent = await file.text();
-	}
-
-	async function handleImportCsv(event: SubmitEvent) {
-		event.preventDefault();
-		if (!csvTargetEntityId || !csvRawContent.trim()) {
-			toast.error('Veuillez choisir une entité et fournir un contenu CSV.');
-			return;
-		}
-
-		isImportingCsv = true;
-		try {
-			const result = await apiRegistry.payment.importPaymentsCsv(csvTargetEntityId, csvRawContent);
-			toast.success(
-				`${result.imported_count} virement(s) importé(s) (${formatCentsToEuro(result.total_imported_cents)}).`
-			);
-			csvDialogOpen = false;
-			csvRawContent = '';
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Échec de l’import bancaire CSV.');
-		} finally {
-			isImportingCsv = false;
-		}
-	}
-
-	async function handleCashDeposit(event: SubmitEvent) {
-		event.preventDefault();
-		if (!depositEntityId) return;
-
-		let amountCents: number;
-		try {
-			amountCents = parseEuroToCents(depositAmountEuro);
-		} catch {
-			toast.error('Montant de remise en banque invalide.');
-			return;
-		}
-
-		if (amountCents <= 0) {
-			toast.error('Le montant déposé doit être supérieur à 0 €.');
-			return;
-		}
-
-		isSubmittingDeposit = true;
-		try {
-			await apiRegistry.payment.recordCashDeposit({
-				legal_entity_id: depositEntityId,
-				amount_cents: amountCents,
-				label: depositLabel.trim() || 'Remise espèces en banque (530 → 512)',
-				entry_date: depositDate ? new Date(depositDate).toISOString() : undefined
-			});
-			toast.success('Remise d’espèces en banque enregistrée (écriture 530 → 512).');
-			depositDialogOpen = false;
-			depositAmountEuro = '';
-			reloadCounter += 1;
-		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Impossible d’enregistrer la remise d’espèces.'
-			);
-		} finally {
-			isSubmittingDeposit = false;
-		}
 	}
 </script>
 
@@ -434,19 +268,33 @@
 			aria-label="Mois d'échéance"
 		/>
 
-		<Button
-			variant="secondary"
-			size="sm"
-			onclick={handleGenerateMonthlyCalls}
-			disabled={isGeneratingCalls || entities.length === 0}
+		<form
+			method="POST"
+			action="?/generateCalls"
+			use:enhance={() => {
+				isGeneratingCalls = true;
+				return async ({ update }) => {
+					await update();
+					isGeneratingCalls = false;
+				};
+			}}
 		>
-			{#if isGeneratingCalls}
-				<Spinner data-icon="inline-start" />
-			{:else}
-				<IconCalendarPlus data-icon="inline-start" />
-			{/if}
-			Générer appels du mois
-		</Button>
+			<input type="hidden" name="entity_id" value={workspaceStore.selectedEntityId} />
+			<input type="hidden" name="period_month" value={workspaceStore.selectedPeriodMonth} />
+			<Button
+				type="submit"
+				variant="secondary"
+				size="sm"
+				disabled={isGeneratingCalls || data.entities.length === 0}
+			>
+				{#if isGeneratingCalls}
+					<Spinner data-icon="inline-start" />
+				{:else}
+					<IconCalendarPlus data-icon="inline-start" />
+				{/if}
+				Générer appels du mois
+			</Button>
+		</form>
 
 		<Button variant="outline" size="sm" onclick={() => (csvDialogOpen = true)}>
 			<IconFileUpload data-icon="inline-start" />
@@ -460,11 +308,11 @@
 	{/snippet}
 </PageHeader>
 
-{#if errorMessage}
+{#if data.errorMessage}
 	<Alert.Root variant="destructive">
 		<IconAlertTriangle class="size-4" />
 		<Alert.Title>Erreur</Alert.Title>
-		<Alert.Description>{errorMessage}</Alert.Description>
+		<Alert.Description>{data.errorMessage}</Alert.Description>
 	</Alert.Root>
 {/if}
 
@@ -491,12 +339,7 @@
 	</ToggleGroup.Root>
 </div>
 
-{#if isLoading}
-	<div class="flex flex-col gap-3">
-		<Skeleton class="h-12 w-full" />
-		<Skeleton class="h-48 w-full" />
-	</div>
-{:else if filteredRows.length === 0}
+{#if filteredRows.length === 0}
 	<Card.Root>
 		<Card.Content class="py-10">
 			<Empty.Root>
@@ -673,10 +516,10 @@
 	entityName={selectedRow?.entity.name ?? ''}
 	propertyAndLotLabel={selectedRow?.propertyAndLotLabel ?? ''}
 	periodMonth={workspaceStore.selectedPeriodMonth}
+	templates={data.templates}
+	leaseDocuments={selectedRow ? (data.documentsByLeaseId[selectedRow.lease.id] ?? []) : []}
+	assembledGliArchive={form?.gliArchive ?? null}
 	initialAction={sheetInitialAction}
-	onChanged={() => {
-		reloadCounter += 1;
-	}}
 />
 
 <!-- CSV Import Dialog -->
@@ -690,7 +533,19 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<form onsubmit={handleImportCsv} class="flex flex-col gap-4">
+		<form
+			method="POST"
+			action="?/importCsv"
+			use:enhance={() => {
+				isImportingCsv = true;
+				return async ({ update }) => {
+					await update();
+					isImportingCsv = false;
+				};
+			}}
+			class="flex flex-col gap-4"
+		>
+			<input type="hidden" name="entity_id" value={csvTargetEntityId} />
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label>Entité juridique</Field.Label>
@@ -702,11 +557,12 @@
 						}}
 					>
 						<Select.Trigger class="w-full">
-							{entities.find((e) => e.id === csvTargetEntityId)?.name ?? 'Sélectionner une entité'}
+							{data.entities.find((e) => e.id === csvTargetEntityId)?.name ??
+								'Sélectionner une entité'}
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Group>
-								{#each entities as entity (entity.id)}
+								{#each data.entities as entity (entity.id)}
 									<Select.Item value={entity.id} label={entity.name}>{entity.name}</Select.Item>
 								{/each}
 							</Select.Group>
@@ -723,6 +579,7 @@
 					<Field.Label for="csv-raw">Contenu CSV brut</Field.Label>
 					<textarea
 						id="csv-raw"
+						name="csv_content"
 						rows="4"
 						class="w-full rounded-md border border-input bg-background p-2 font-mono text-xs placeholder:text-muted-foreground"
 						placeholder="lease_id,amount_cents,payment_date,label,external_ref"
@@ -756,7 +613,19 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<form onsubmit={handleCashDeposit} class="flex flex-col gap-4">
+		<form
+			method="POST"
+			action="?/cashDeposit"
+			use:enhance={() => {
+				isSubmittingDeposit = true;
+				return async ({ update }) => {
+					await update();
+					isSubmittingDeposit = false;
+				};
+			}}
+			class="flex flex-col gap-4"
+		>
+			<input type="hidden" name="legal_entity_id" value={depositEntityId} />
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label>Entité juridique</Field.Label>
@@ -768,11 +637,12 @@
 						}}
 					>
 						<Select.Trigger class="w-full">
-							{entities.find((e) => e.id === depositEntityId)?.name ?? 'Sélectionner une entité'}
+							{data.entities.find((e) => e.id === depositEntityId)?.name ??
+								'Sélectionner une entité'}
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Group>
-								{#each entities as entity (entity.id)}
+								{#each data.entities as entity (entity.id)}
 									<Select.Item value={entity.id} label={entity.name}>{entity.name}</Select.Item>
 								{/each}
 							</Select.Group>
@@ -785,6 +655,7 @@
 						<Field.Label for="deposit-amount">Montant déposé (€)</Field.Label>
 						<Input
 							id="deposit-amount"
+							name="amount_euro"
 							type="text"
 							inputmode="decimal"
 							placeholder="500,00"
@@ -795,13 +666,19 @@
 
 					<Field.Field>
 						<Field.Label for="deposit-date">Date du dépôt</Field.Label>
-						<Input id="deposit-date" type="date" bind:value={depositDate} required />
+						<Input
+							id="deposit-date"
+							name="entry_date"
+							type="date"
+							bind:value={depositDate}
+							required
+						/>
 					</Field.Field>
 				</div>
 
 				<Field.Field>
-					<Field.Label for="deposit-label">Libellé du bordereau</Field.Label>
-					<Input id="deposit-label" type="text" bind:value={depositLabel} required />
+					<Field.Label for="deposit-label">Libellé de l'écriture</Field.Label>
+					<Input id="deposit-label" name="label" type="text" bind:value={depositLabel} required />
 				</Field.Field>
 			</Field.FieldGroup>
 

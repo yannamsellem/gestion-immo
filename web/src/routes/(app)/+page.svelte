@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
 	import IconAlertTriangle from '@tabler/icons-svelte/icons/alert-triangle';
 	import IconBuildingBank from '@tabler/icons-svelte/icons/building-bank';
 	import IconCalendarEvent from '@tabler/icons-svelte/icons/calendar-event';
@@ -12,25 +13,13 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Empty from '#lib/components/ui/empty/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
-	import { Skeleton } from '#lib/components/ui/skeleton/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
-	import { ApiError } from '#lib/core/api/api-error';
 	import { formatPeriodMonthFr } from '#lib/core/formatters/date';
 	import { formatCentsToEuro } from '#lib/core/formatters/money';
 	import { workspaceStore } from '#lib/core/workspace/workspace.svelte';
-	import { buildCockpitEntityGroups } from '#lib/modules/cockpit/cockpit-builder';
-	import type { EntityCockpitGroup } from '#lib/modules/cockpit/types';
-	import type { RentCallDTO } from '#lib/modules/lease/types';
-	import type { NegativePositionDTO } from '#lib/modules/payment/types';
-	import type { PropertyDTO } from '#lib/modules/portfolio/types';
-	import { apiRegistry } from '#lib/modules/registry';
+	import type { PageProps } from './$types';
 
-	let isLoading = $state(true);
-	let errorMessage = $state<string | null>(null);
-	let groups = $state<EntityCockpitGroup[]>([]);
-	let totalOverdueLeasesCount = $state(0);
-	let totalOpenIncidentsCount = $state(0);
-	let reloadTrigger = $state(0);
+	let { data }: PageProps = $props();
 
 	const ENTITY_TYPE_LABELS: Record<string, string> = {
 		SCI_IR: 'SCI à l’IR',
@@ -59,106 +48,14 @@
 	}
 
 	const totalCollectedCents = $derived(
-		groups.reduce((sum, group) => sum + group.collectedRentCents, 0)
+		data.groups.reduce((sum, group) => sum + group.collectedRentCents, 0)
 	);
 	const totalExpectedCents = $derived(
-		groups.reduce((sum, group) => sum + group.expectedRentCents, 0)
+		data.groups.reduce((sum, group) => sum + group.expectedRentCents, 0)
 	);
 	const totalRemainingDueCents = $derived(
-		groups.reduce((sum, group) => sum + group.remainingDueCents, 0)
+		data.groups.reduce((sum, group) => sum + group.remainingDueCents, 0)
 	);
-
-	$effect(() => {
-		const selectedEntityId = workspaceStore.selectedEntityId;
-		const periodMonth = workspaceStore.selectedPeriodMonth;
-		const trigger = reloadTrigger;
-		void trigger;
-
-		let cancelled = false;
-		isLoading = true;
-		errorMessage = null;
-
-		void (async () => {
-			try {
-				const allEntities = await apiRegistry.portfolio.listEntities();
-				if (cancelled) return;
-				workspaceStore.setEntities(allEntities);
-
-				const targetEntities =
-					selectedEntityId === 'ALL'
-						? allEntities
-						: allEntities.filter((entity) => entity.id === selectedEntityId);
-
-				if (targetEntities.length === 0) {
-					groups = [];
-					totalOverdueLeasesCount = 0;
-					totalOpenIncidentsCount = 0;
-					return;
-				}
-
-				const [leases, tenants, incidents] = await Promise.all([
-					apiRegistry.lease.listLeases(selectedEntityId),
-					apiRegistry.lease.listTenants(false),
-					apiRegistry.inspection.listIncidents().catch(() => [])
-				]);
-				if (cancelled) return;
-
-				const propertiesByEntity: Record<string, PropertyDTO[]> = {};
-				const rentCallsByEntity: Record<string, RentCallDTO[]> = {};
-				const negativePositionsByEntity: Record<string, NegativePositionDTO[]> = {};
-
-				await Promise.all(
-					targetEntities.map(async (entity) => {
-						const [properties, rentCalls, negativePositions] = await Promise.all([
-							apiRegistry.portfolio.listProperties(entity.id),
-							apiRegistry.lease.listEntityRentCalls(entity.id, periodMonth),
-							apiRegistry.payment.listNegativePositions(entity.id).catch(() => [])
-						]);
-						propertiesByEntity[entity.id] = properties;
-						rentCallsByEntity[entity.id] = rentCalls;
-						negativePositionsByEntity[entity.id] = negativePositions;
-					})
-				);
-				if (cancelled) return;
-
-				const computedGroups = buildCockpitEntityGroups({
-					periodMonth,
-					entities: targetEntities,
-					propertiesByEntity,
-					leases,
-					tenants,
-					rentCallsByEntity,
-					negativePositionsByEntity,
-					incidents
-				});
-
-				groups = computedGroups;
-				totalOverdueLeasesCount = Object.values(negativePositionsByEntity).reduce(
-					(acc, list) => acc + list.filter((item) => item.total_unpaid_cents > 0).length,
-					0
-				);
-				totalOpenIncidentsCount = computedGroups.reduce(
-					(acc, group) =>
-						acc + group.rows.reduce((rowAcc, row) => rowAcc + row.openIncidentsCount, 0),
-					0
-				);
-			} catch (err) {
-				if (cancelled) return;
-				errorMessage =
-					err instanceof ApiError
-						? err.message
-						: 'Impossible de charger les données du cockpit opérationnel.';
-			} finally {
-				if (!cancelled) {
-					isLoading = false;
-				}
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-		};
-	});
 
 	function handlePeriodChange(event: Event) {
 		const target = event.currentTarget as HTMLInputElement;
@@ -183,18 +80,18 @@
 				aria-label="Mois de gestion"
 			/>
 		</div>
-		<Button variant="outline" size="sm" onclick={() => (reloadTrigger += 1)}>
+		<Button variant="outline" size="sm" onclick={() => void invalidateAll()}>
 			<IconRefresh data-icon="inline-start" />
 			Actualiser
 		</Button>
 	{/snippet}
 </PageHeader>
 
-{#if errorMessage}
+{#if data.errorMessage}
 	<Alert.Root variant="destructive">
 		<IconAlertTriangle class="size-4" />
 		<Alert.Title>Erreur de chargement</Alert.Title>
-		<Alert.Description>{errorMessage}</Alert.Description>
+		<Alert.Description>{data.errorMessage}</Alert.Description>
 	</Alert.Root>
 {/if}
 
@@ -231,7 +128,7 @@
 		<Card.Header class="pb-2">
 			<Card.Description>Impayés à relancer</Card.Description>
 			<Card.Title class="text-xl font-semibold tabular-nums">
-				{totalOverdueLeasesCount}
+				{data.totalOverdueLeasesCount}
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
@@ -243,7 +140,7 @@
 		<Card.Header class="pb-2">
 			<Card.Description>Incidents & travaux ouverts</Card.Description>
 			<Card.Title class="text-xl font-semibold tabular-nums">
-				{totalOpenIncidentsCount}
+				{data.totalOpenIncidentsCount}
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
@@ -252,12 +149,7 @@
 	</Card.Root>
 </div>
 
-{#if isLoading}
-	<div class="flex flex-col gap-4">
-		<Skeleton class="h-44 w-full" />
-		<Skeleton class="h-44 w-full" />
-	</div>
-{:else if groups.length === 0}
+{#if data.groups.length === 0}
 	<Card.Root>
 		<Card.Content class="py-10">
 			<Empty.Root>
@@ -282,7 +174,7 @@
 	</Card.Root>
 {:else}
 	<div class="flex flex-col gap-5">
-		{#each groups as group (group.entity.id)}
+		{#each data.groups as group (group.entity.id)}
 			<Card.Root>
 				<Card.Header
 					class="flex flex-col justify-between gap-3 border-b pb-3 sm:flex-row sm:items-center"

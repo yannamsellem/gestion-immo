@@ -1,53 +1,18 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import IconLock from '@tabler/icons-svelte/icons/lock';
-	import { toast } from 'svelte-sonner';
+	import ThemeToggle from '#lib/components/layout/ThemeToggle.svelte';
 	import * as Alert from '#lib/components/ui/alert/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Field from '#lib/components/ui/field/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
-	import ThemeToggle from '#lib/components/layout/ThemeToggle.svelte';
-	import { ApiError } from '#lib/core/api/api-error';
-	import { authStore } from '#lib/modules/auth/auth-store.svelte';
-	import { apiRegistry } from '#lib/modules/registry';
+	import type { PageProps } from './$types';
 
-	let email = $state('');
-	let password = $state('');
-	let errorMessage = $state<string | null>(null);
-	let isPendingApproval = $state(false);
+	let { form }: PageProps = $props();
 	let isSubmitting = $state(false);
-
-	async function handleSubmit(event: SubmitEvent): Promise<void> {
-		event.preventDefault();
-		errorMessage = null;
-		isPendingApproval = false;
-		isSubmitting = true;
-
-		try {
-			const response = await apiRegistry.auth.login({
-				email: email.trim(),
-				password
-			});
-			authStore.setSession(response);
-			toast.success(`Bienvenue, ${response.user.full_name}`);
-			await goto(resolve('/(app)'));
-		} catch (err) {
-			if (err instanceof ApiError && err.status === 403) {
-				isPendingApproval = true;
-				errorMessage =
-					'Votre compte est en attente de validation par un administrateur (SUPER_ADMIN).';
-			} else if (err instanceof ApiError) {
-				errorMessage = err.message;
-			} else {
-				errorMessage = 'Impossible de se connecter au serveur.';
-			}
-		} finally {
-			isSubmitting = false;
-		}
-	}
 </script>
 
 <div class="flex min-h-screen flex-col justify-center bg-background p-4">
@@ -64,26 +29,36 @@
 		</Card.Header>
 
 		<Card.Content>
-			{#if errorMessage}
-				<Alert.Root variant={isPendingApproval ? 'default' : 'destructive'} class="mb-4">
+			{#if form?.errorMessage}
+				<Alert.Root variant={form.isPendingApproval ? 'default' : 'destructive'} class="mb-4">
 					<Alert.Title>
-						{isPendingApproval ? 'Approbation en attente' : 'Échec de connexion'}
+						{form.isPendingApproval ? 'Approbation en attente' : 'Échec de connexion'}
 					</Alert.Title>
-					<Alert.Description>{errorMessage}</Alert.Description>
+					<Alert.Description>{form.errorMessage}</Alert.Description>
 				</Alert.Root>
 			{/if}
 
-			<form onsubmit={handleSubmit}>
+			<form
+				method="POST"
+				use:enhance={() => {
+					isSubmitting = true;
+					return async ({ update }) => {
+						await update();
+						isSubmitting = false;
+					};
+				}}
+			>
 				<Field.FieldGroup>
 					<Field.Field>
 						<Field.FieldLabel for="login-email">Adresse e-mail</Field.FieldLabel>
 						<Input
 							id="login-email"
+							name="email"
 							type="email"
 							required
 							autocomplete="email"
 							placeholder="gestionnaire@exemple.fr"
-							bind:value={email}
+							value={form?.email ?? ''}
 						/>
 					</Field.Field>
 
@@ -91,11 +66,11 @@
 						<Field.FieldLabel for="login-password">Mot de passe</Field.FieldLabel>
 						<Input
 							id="login-password"
+							name="password"
 							type="password"
 							required
 							autocomplete="current-password"
 							placeholder="••••••••••••"
-							bind:value={password}
 						/>
 					</Field.Field>
 
