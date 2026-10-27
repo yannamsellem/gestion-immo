@@ -248,7 +248,7 @@
 		event.preventDefault();
 		if (!newIncidentTitle.trim()) return;
 
-		let estimatedCostCents = 0;
+		let estimatedCostCents: number;
 		try {
 			estimatedCostCents = parseEuroToCents(newIncidentEstimatedEuro || '0');
 		} catch {
@@ -284,7 +284,7 @@
 		event.preventDefault();
 		if (!selectedIncident) return;
 
-		let estimatedCostCents = 0;
+		let estimatedCostCents: number;
 		try {
 			estimatedCostCents = parseEuroToCents(editIncidentCostEuro || '0');
 		} catch {

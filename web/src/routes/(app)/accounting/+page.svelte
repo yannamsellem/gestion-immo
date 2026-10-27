@@ -242,8 +242,8 @@
 		event.preventDefault();
 		if (!activeEntityId || !balAccountCode.trim() || !balLabel.trim()) return;
 
-		let netNCents = 0;
-		let netNMinus1Cents = 0;
+		let netNCents: number;
+		let netNMinus1Cents: number;
 		try {
 			netNCents = parseEuroToCents(balNetNEuro || '0');
 			netNMinus1Cents = parseEuroToCents(balNetNMinus1Euro || '0');

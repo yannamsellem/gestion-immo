@@ -168,7 +168,7 @@
 		event.preventDefault();
 		if (!newName.trim()) return;
 
-		let shareCapitalCents = 0;
+		let shareCapitalCents: number;
 		try {
 			shareCapitalCents = parseEuroToCents(newShareCapitalEuro || '0');
 		} catch {
@@ -206,8 +206,8 @@
 		event.preventDefault();
 		if (!shEntityId || !shFullName.trim()) return;
 
-		let currentAccountCents = 0;
-		let remunerationPaidCents = 0;
+		let currentAccountCents: number;
+		let remunerationPaidCents: number;
 		try {
 			currentAccountCents = parseEuroToCents(shCurrentAccountEuro || '0');
 			remunerationPaidCents = parseEuroToCents(shRemunerationEuro || '0');

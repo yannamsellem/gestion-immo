@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import AppSidebar from '#lib/components/layout/AppSidebar.svelte';
 	import ThemeToggle from '#lib/components/layout/ThemeToggle.svelte';
 	import { Badge } from '#lib/components/ui/badge/index.js';
@@ -20,7 +21,7 @@
 			return;
 		}
 		if (!authStore.isAuthenticated) {
-			void goto('/login');
+			void goto(resolve('/(auth)/login'));
 			return;
 		}
 

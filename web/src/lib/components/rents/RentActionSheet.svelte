@@ -144,7 +144,7 @@
 		if (!lease) return;
 
 		paymentError = null;
-		let amountCents = 0;
+		let amountCents: number;
 		try {
 			amountCents = parseEuroToCents(amountEuroInput);
 		} catch {

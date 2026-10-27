@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import IconLock from '@tabler/icons-svelte/icons/lock';
 	import { toast } from 'svelte-sonner';
 	import * as Alert from '#lib/components/ui/alert/index.js';
@@ -32,7 +33,7 @@
 			});
 			authStore.setSession(response);
 			toast.success(`Bienvenue, ${response.user.full_name}`);
-			await goto('/');
+			await goto(resolve('/(app)'));
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 403) {
 				isPendingApproval = true;
@@ -114,7 +115,10 @@
 		<Card.Footer class="justify-center border-t pt-4">
 			<p class="text-xs text-muted-foreground">
 				Pas encore de compte ?
-				<a href="/signup" class="font-medium text-primary underline-offset-4 hover:underline">
+				<a
+					href={resolve('/(auth)/signup')}
+					class="font-medium text-primary underline-offset-4 hover:underline"
+				>
 					Demander un accès
 				</a>
 			</p>

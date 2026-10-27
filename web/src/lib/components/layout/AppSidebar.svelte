@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import IconBuildingBank from '@tabler/icons-svelte/icons/building-bank';
 	import IconCalculator from '@tabler/icons-svelte/icons/calculator';
@@ -30,49 +31,49 @@
 
 	const navItems = $derived([
 		{
-			href: '/',
+			route: '/(app)' as const,
 			label: 'Cockpit Opérationnel',
 			icon: IconLayoutDashboard,
 			badge: 0
 		},
 		{
-			href: '/rents',
+			route: '/(app)/rents' as const,
 			label: 'Loyers & Relances',
 			icon: IconReceiptEuro,
 			badge: pendingRentTasksCount
 		},
 		{
-			href: '/inspections',
+			route: '/(app)/inspections' as const,
 			label: 'Incidents & États des lieux',
 			icon: IconClipboardCheck,
 			badge: openIncidentsCount
 		},
 		{
-			href: '/properties',
+			route: '/(app)/properties' as const,
 			label: 'Biens & Lots',
 			icon: IconHome,
 			badge: 0
 		},
 		{
-			href: '/leases',
+			route: '/(app)/leases' as const,
 			label: 'Baux & Locataires',
 			icon: IconFileText,
 			badge: 0
 		},
 		{
-			href: '/accounting',
+			route: '/(app)/accounting' as const,
 			label: 'Comptabilité & Fiscalité',
 			icon: IconCalculator,
 			badge: 0
 		},
 		{
-			href: '/entities',
+			route: '/(app)/entities' as const,
 			label: 'Entités & Associés',
 			icon: IconBuildingBank,
 			badge: 0
 		},
 		{
-			href: '/admin',
+			route: '/(app)/admin' as const,
 			label: 'Administration & Accès',
 			icon: IconShieldLock,
 			badge: 0
@@ -96,7 +97,7 @@
 			}
 		}
 		authStore.clearSession();
-		await goto('/login');
+		await goto(resolve('/(auth)/login'));
 	}
 </script>
 
@@ -117,12 +118,13 @@
 			<Sidebar.GroupLabel>Pilotage Métier</Sidebar.GroupLabel>
 			<Sidebar.GroupContent>
 				<Sidebar.Menu>
-					{#each navItems as item (item.href)}
+					{#each navItems as item (item.route)}
 						{@const Icon = item.icon}
+						{@const resolvedHref = resolve(item.route)}
 						<Sidebar.MenuItem>
-							<Sidebar.MenuButton isActive={isRouteActive(item.href, page.url.pathname)}>
+							<Sidebar.MenuButton isActive={isRouteActive(resolvedHref, page.url.pathname)}>
 								{#snippet child({ props })}
-									<a href={item.href} {...props}>
+									<a href={resolvedHref} {...props}>
 										<Icon />
 										<span>{item.label}</span>
 									</a>

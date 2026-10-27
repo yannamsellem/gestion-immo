@@ -213,15 +213,13 @@
 
 	const entityMap = $derived(new Map(entities.map((e) => [e.id, e])));
 	const tenantMap = $derived(new Map(tenants.map((t) => [t.id, t])));
-	const lotInfoMap = $derived.by(() => {
-		const map = new Map<string, { lot: LotDTO; property: PropertyDTO }>();
-		for (const prop of properties) {
-			for (const lot of prop.lots ?? []) {
-				map.set(lot.id, { lot, property: prop });
-			}
-		}
-		return map;
-	});
+	const lotInfoMap = $derived(
+		new Map<string, { lot: LotDTO; property: PropertyDTO }>(
+			properties.flatMap((prop) =>
+				(prop.lots ?? []).map((lot) => [lot.id, { lot, property: prop }] as const)
+			)
+		)
+	);
 
 	const availableLotsForSelectedEntity = $derived(
 		properties
@@ -277,9 +275,9 @@
 			return;
 		}
 
-		let rentNetCents = 0;
-		let chargesCents = 0;
-		let depositCents = 0;
+		let rentNetCents: number;
+		let chargesCents: number;
+		let depositCents: number;
 		let vatBasisPoints = 0;
 
 		try {

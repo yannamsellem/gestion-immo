@@ -172,31 +172,27 @@
 	const unifiedRows = $derived.by((): UnifiedRentRow[] => {
 		const entityMap = new Map(entities.map((entity) => [entity.id, entity]));
 		const tenantMap = new Map(tenants.map((tenant) => [tenant.id, tenant]));
-		const lotLabelMap = new Map<string, string>();
+		const lotLabelMap = new Map<string, string>(
+			Object.values(propertiesByEntity).flatMap((propList) =>
+				propList.flatMap((prop) =>
+					(prop.lots ?? []).map((lot) => [lot.id, `${prop.label} — ${lot.label}`] as const)
+				)
+			)
+		);
 
-		for (const propList of Object.values(propertiesByEntity)) {
-			for (const prop of propList) {
-				for (const lot of prop.lots ?? []) {
-					lotLabelMap.set(lot.id, `${prop.label} — ${lot.label}`);
-				}
-			}
-		}
+		const rentCallByLeaseId = new Map<string, RentCallDTO>(
+			Object.values(rentCallsByEntity).flatMap((callList) =>
+				callList
+					.filter((rc) => rc.period_month === workspaceStore.selectedPeriodMonth)
+					.map((rc) => [rc.lease_id, rc] as const)
+			)
+		);
 
-		const rentCallByLeaseId = new Map<string, RentCallDTO>();
-		for (const callList of Object.values(rentCallsByEntity)) {
-			for (const rc of callList) {
-				if (rc.period_month === workspaceStore.selectedPeriodMonth) {
-					rentCallByLeaseId.set(rc.lease_id, rc);
-				}
-			}
-		}
-
-		const negativeByLeaseId = new Map<string, NegativePositionDTO>();
-		for (const negList of Object.values(negativePositionsByEntity)) {
-			for (const neg of negList) {
-				negativeByLeaseId.set(neg.lease_id, neg);
-			}
-		}
+		const negativeByLeaseId = new Map<string, NegativePositionDTO>(
+			Object.values(negativePositionsByEntity).flatMap((negList) =>
+				negList.map((neg) => [neg.lease_id, neg] as const)
+			)
+		);
 
 		return leases
 			.filter(
@@ -387,7 +383,7 @@
 		event.preventDefault();
 		if (!depositEntityId) return;
 
-		let amountCents = 0;
+		let amountCents: number;
 		try {
 			amountCents = parseEuroToCents(depositAmountEuro);
 		} catch {

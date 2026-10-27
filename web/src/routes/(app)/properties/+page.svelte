@@ -171,8 +171,8 @@
 		event.preventDefault();
 		if (!propEntityId || !propLabel.trim()) return;
 
-		let acquisitionCents = 0;
-		let workStockCents = 0;
+		let acquisitionCents: number;
+		let workStockCents: number;
 		try {
 			acquisitionCents = parseEuroToCents(propAcquisitionEuro || '0');
 			workStockCents = parseEuroToCents(propWorkStockEuro || '0');

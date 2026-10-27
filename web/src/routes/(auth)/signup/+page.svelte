@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import IconUserPlus from '@tabler/icons-svelte/icons/user-plus';
 	import { toast } from 'svelte-sonner';
 	import * as Alert from '#lib/components/ui/alert/index.js';
@@ -132,7 +133,10 @@
 		<Card.Footer class="justify-center border-t pt-4">
 			<p class="text-xs text-muted-foreground">
 				Déjà approuvé ?
-				<a href="/login" class="font-medium text-primary underline-offset-4 hover:underline">
+				<a
+					href={resolve('/(auth)/login')}
+					class="font-medium text-primary underline-offset-4 hover:underline"
+				>
 					Retour à la connexion
 				</a>
 			</p>
