@@ -49,7 +49,13 @@
 	},
 	"imports": {
 		"#lib": "./src/lib/index.js",
-		"#lib/*": "./src/lib/*"
+		"#lib/*": [
+			"./src/lib/*",
+			"./src/lib/*.ts",
+			"./src/lib/*.js",
+			"./src/lib/*/index.ts",
+			"./src/lib/*/index.js"
+		]
 	},
 	"dependencies": {
 		"mode-watcher": "^1.1.0"
