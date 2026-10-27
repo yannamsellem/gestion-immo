@@ -102,7 +102,9 @@
 						: lease.rent_net_cents + lease.charges_cents;
 
 		amountEuroInput = centsToEditableEuroString(defaultDueCents);
-		paymentLabel = `Loyer ${formatPeriodMonthFr(periodMonth)} — ${tenantName}`;
+		paymentLabel = tenantName
+			? `Loyer ${formatPeriodMonthFr(periodMonth)} — ${tenantName}`
+			: `Loyer ${formatPeriodMonthFr(periodMonth)}`;
 		paymentReference = '';
 		paymentError = null;
 		assembledGliArchive = null;
@@ -211,9 +213,7 @@
 			leaseDocuments = [generated, ...leaseDocuments];
 			toast.success(`Document généré : ${generated.file_name}`);
 		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Échec de la génération du document.'
-			);
+			toast.error(err instanceof ApiError ? err.message : 'Échec de la génération du document.');
 		} finally {
 			isGeneratingDoc = false;
 		}
@@ -234,9 +234,7 @@
 			toast.success('Dossier sinistre GLI (.zip) assemblé avec succès.');
 		} catch (err) {
 			toast.error(
-				err instanceof ApiError
-					? err.message
-					: 'Impossible d’assembler le dossier de sinistre GLI.'
+				err instanceof ApiError ? err.message : 'Impossible d’assembler le dossier de sinistre GLI.'
 			);
 		} finally {
 			isAssemblingGli = false;
@@ -257,7 +255,7 @@
 			<Sheet.Description>
 				{#if rentCall}
 					Échéance du mois : {formatCentsToEuro(rentCall.total_due_cents)} · Reste dû :
-					<strong class="text-foreground font-semibold">
+					<strong class="font-semibold text-foreground">
 						{formatCentsToEuro(rentCall.remaining_due_cents)}
 					</strong>
 				{:else if lease}
@@ -414,21 +412,21 @@
 							</Button>
 						</div>
 					{:else}
-						<p class="text-muted-foreground text-xs">
+						<p class="text-xs text-muted-foreground">
 							Aucun modèle de document enregistré. Vous pouvez en créer un depuis les paramètres ou
 							utiliser l'assemblage GLI.
 						</p>
 					{/if}
 
 					{#if isLoadingDocs}
-						<p class="text-muted-foreground text-xs">Chargement des documents du bail...</p>
+						<p class="text-xs text-muted-foreground">Chargement des documents du bail...</p>
 					{:else if leaseDocuments.length > 0}
 						<div class="flex flex-col gap-1.5 rounded-md border p-2.5">
 							{#each leaseDocuments as doc (doc.id)}
 								<div class="flex items-center justify-between gap-2 text-xs">
 									<div class="flex min-w-0 flex-col">
 										<span class="truncate font-medium">{doc.file_name}</span>
-										<span class="text-muted-foreground text-[11px]">
+										<span class="text-[11px] text-muted-foreground">
 											{doc.category} · {formatIsoDateFr(doc.created_at)}
 										</span>
 									</div>
@@ -448,7 +446,7 @@
 							{/each}
 						</div>
 					{:else}
-						<p class="text-muted-foreground text-xs">Aucun document généré pour ce bail.</p>
+						<p class="text-xs text-muted-foreground">Aucun document généré pour ce bail.</p>
 					{/if}
 				</div>
 
@@ -462,7 +460,9 @@
 					</h3>
 
 					{#if negativePosition && negativePosition.total_unpaid_cents > 0}
-						<div class="bg-destructive/10 border-destructive/30 flex flex-col gap-2 rounded-md border p-3 text-xs">
+						<div
+							class="flex flex-col gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs"
+						>
 							<div class="flex items-center justify-between">
 								<span class="font-semibold">Arriéré locatif constaté</span>
 								<Badge variant="destructive">
@@ -481,7 +481,7 @@
 							{/if}
 						</div>
 					{:else}
-						<p class="text-muted-foreground text-xs">
+						<p class="text-xs text-muted-foreground">
 							Aucun arriéré impayé détecté sur ce bail. Vous pouvez néanmoins compiler une archive
 							documentaire GLI si nécessaire.
 						</p>
@@ -504,14 +504,14 @@
 					</Button>
 
 					{#if assembledGliArchive}
-						<div class="bg-muted/50 flex flex-col gap-2 rounded-md border p-3 text-xs">
+						<div class="flex flex-col gap-2 rounded-md border bg-muted/50 p-3 text-xs">
 							<div class="flex items-center justify-between">
 								<span class="font-semibold">Archive GLI prête</span>
 								<span class="font-mono">
 									{formatCentsToEuro(assembledGliArchive.total_unpaid_cents)}
 								</span>
 							</div>
-							<p class="text-muted-foreground text-[11px]">
+							<p class="text-[11px] text-muted-foreground">
 								Pièces incluses ({assembledGliArchive.included_files.length}) :
 								{assembledGliArchive.included_files.join(', ')}
 							</p>

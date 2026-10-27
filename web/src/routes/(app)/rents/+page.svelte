@@ -238,7 +238,10 @@
 					statusCategory = 'OVERDUE';
 					statusBadgeLabel = `Impayé (${negativePosition.unpaid_months.length} m.)`;
 					statusBadgeVariant = 'destructive';
-				} else if (rentCall?.status === 'PAID' || (rentCall && rentCall.remaining_due_cents === 0)) {
+				} else if (
+					rentCall?.status === 'PAID' ||
+					(rentCall && rentCall.remaining_due_cents === 0)
+				) {
 					statusCategory = 'PAID';
 					statusBadgeLabel = 'Soldé';
 					statusBadgeVariant = 'secondary';
@@ -275,9 +278,7 @@
 		})
 	);
 
-	const selectedRow = $derived(
-		unifiedRows.find((row) => row.lease.id === selectedLeaseId) ?? null
-	);
+	const selectedRow = $derived(unifiedRows.find((row) => row.lease.id === selectedLeaseId) ?? null);
 
 	const allCashEntries = $derived(
 		Object.values(cashJournalByEntity)
@@ -292,10 +293,7 @@
 		const urlLeaseId = page.url.searchParams.get('leaseId');
 		const urlRentCallId = page.url.searchParams.get('rentCallId');
 		const urlAction = page.url.searchParams.get('action') as
-			| 'pay'
-			| 'remind'
-			| 'generate-calls'
-			| null;
+			'pay' | 'remind' | 'generate-calls' | null;
 
 		const queryKey = `${urlLeaseId ?? ''}|${urlRentCallId ?? ''}|${urlAction ?? ''}`;
 		if (!urlLeaseId && !urlRentCallId) return;
@@ -348,9 +346,7 @@
 			reloadCounter += 1;
 		} catch (err) {
 			toast.error(
-				err instanceof ApiError
-					? err.message
-					: 'Erreur lors de la génération des appels de loyers.'
+				err instanceof ApiError ? err.message : 'Erreur lors de la génération des appels de loyers.'
 			);
 		} finally {
 			isGeneratingCalls = false;
@@ -373,10 +369,7 @@
 
 		isImportingCsv = true;
 		try {
-			const result = await apiRegistry.payment.importPaymentsCsv(
-				csvTargetEntityId,
-				csvRawContent
-			);
+			const result = await apiRegistry.payment.importPaymentsCsv(csvTargetEntityId, csvRawContent);
 			toast.success(
 				`${result.imported_count} virement(s) importé(s) (${formatCentsToEuro(result.total_imported_cents)}).`
 			);
@@ -384,9 +377,7 @@
 			csvRawContent = '';
 			reloadCounter += 1;
 		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Échec de l’import bancaire CSV.'
-			);
+			toast.error(err instanceof ApiError ? err.message : 'Échec de l’import bancaire CSV.');
 		} finally {
 			isImportingCsv = false;
 		}
@@ -423,9 +414,7 @@
 			reloadCounter += 1;
 		} catch (err) {
 			toast.error(
-				err instanceof ApiError
-					? err.message
-					: 'Impossible d’enregistrer la remise d’espèces.'
+				err instanceof ApiError ? err.message : 'Impossible d’enregistrer la remise d’espèces.'
 			);
 		} finally {
 			isSubmittingDeposit = false;
@@ -546,14 +535,11 @@
 				</Table.Header>
 				<Table.Body>
 					{#each filteredRows as row (row.lease.id)}
-						<Table.Row
-							class="cursor-pointer"
-							onclick={() => openRowSheet(row)}
-						>
+						<Table.Row class="cursor-pointer" onclick={() => openRowSheet(row)}>
 							<Table.Cell class="pl-4">
 								<div class="flex flex-col gap-0.5">
 									<span class="font-medium">{row.propertyAndLotLabel}</span>
-									<span class="text-muted-foreground text-[11px]">{row.entity.name}</span>
+									<span class="text-[11px] text-muted-foreground">{row.entity.name}</span>
 								</div>
 							</Table.Cell>
 
@@ -567,7 +553,7 @@
 
 							<Table.Cell class="text-right font-mono tabular-nums">
 								{#if row.remainingDueCents > 0}
-									<span class="text-destructive font-semibold">
+									<span class="font-semibold text-destructive">
 										{formatCentsToEuro(row.remainingDueCents)}
 									</span>
 								{:else}
@@ -615,21 +601,24 @@
 
 <!-- PCG 530 Cash Journal Card -->
 <Card.Root>
-	<Card.Header class="flex flex-col justify-between gap-2 border-b pb-3 sm:flex-row sm:items-center">
+	<Card.Header
+		class="flex flex-col justify-between gap-2 border-b pb-3 sm:flex-row sm:items-center"
+	>
 		<div>
 			<Card.Title class="flex items-center gap-1.5 text-sm font-semibold">
 				<IconCash class="size-4" />
 				Livre de caisse espèces (Compte PCG 530)
 			</Card.Title>
 			<Card.Description>
-				Traçabilité chronologique des encaissements en espèces (411 → 530) et remises en banque (530 → 512)
+				Traçabilité chronologique des encaissements en espèces (411 → 530) et remises en banque (530
+				→ 512)
 			</Card.Description>
 		</div>
 		<Badge variant="outline">{allCashEntries.length} écriture(s)</Badge>
 	</Card.Header>
 	<Card.Content class="p-0">
 		{#if allCashEntries.length === 0}
-			<p class="text-muted-foreground px-4 py-6 text-xs">
+			<p class="px-4 py-6 text-xs text-muted-foreground">
 				Aucune opération en espèces enregistrée sur ce périmètre.
 			</p>
 		{:else}
@@ -656,7 +645,7 @@
 							<Table.Cell class="text-xs">
 								<span class="font-medium">{entry.label}</span>
 								{#if entry.receipt_number}
-									<span class="text-muted-foreground ml-1 font-mono">
+									<span class="ml-1 font-mono text-muted-foreground">
 										({entry.receipt_number})
 									</span>
 								{/if}
@@ -739,11 +728,10 @@
 					<textarea
 						id="csv-raw"
 						rows="4"
-						class="border-input bg-background placeholder:text-muted-foreground w-full rounded-md border p-2 font-mono text-xs"
+						class="w-full rounded-md border border-input bg-background p-2 font-mono text-xs placeholder:text-muted-foreground"
 						placeholder="lease_id,amount_cents,payment_date,label,external_ref"
 						bind:value={csvRawContent}
-						required
-					></textarea>
+						required></textarea>
 				</Field.Field>
 			</Field.FieldGroup>
 

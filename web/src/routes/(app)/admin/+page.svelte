@@ -51,9 +51,7 @@
 			.catch((err) => {
 				if (!cancelled) {
 					pendingError =
-						err instanceof ApiError
-							? err.message
-							: 'Impossible de charger les comptes en attente.';
+						err instanceof ApiError ? err.message : 'Impossible de charger les comptes en attente.';
 				}
 			})
 			.finally(() => {
@@ -166,7 +164,7 @@
 							Copiez ce jeton immédiatement. Par mesure de sécurité, il ne sera plus affiché en
 							clair après fermeture de cette page :
 						</p>
-						<div class="bg-muted flex items-center justify-between gap-2 rounded border p-2">
+						<div class="flex items-center justify-between gap-2 rounded border bg-muted p-2">
 							<code class="truncate font-mono text-[11px]">{createdMcpToken.token}</code>
 							<Button
 								size="sm"
@@ -202,7 +200,7 @@
 
 		<Card.Content class="p-0">
 			{#if !authStore.isSuperAdmin}
-				<p class="text-muted-foreground px-4 py-6 text-xs">
+				<p class="px-4 py-6 text-xs text-muted-foreground">
 					Votre compte dispose du rôle <strong>{authStore.user?.role ?? 'MANAGER'}</strong>. Seul un
 					administrateur principal (<code>SUPER_ADMIN</code>) peut approuver ou rejeter les
 					nouvelles demandes d'accès.
@@ -220,7 +218,7 @@
 					<Skeleton class="h-24 w-full" />
 				</div>
 			{:else if pendingUsers.length === 0}
-				<p class="text-muted-foreground px-4 py-6 text-xs">
+				<p class="px-4 py-6 text-xs text-muted-foreground">
 					Aucune demande d'inscription en attente d'approbation.
 				</p>
 			{:else}
@@ -238,7 +236,7 @@
 							<Table.Row>
 								<Table.Cell class="pl-4 font-medium">{user.full_name}</Table.Cell>
 								<Table.Cell class="text-xs">{user.email}</Table.Cell>
-								<Table.Cell class="text-muted-foreground text-xs">
+								<Table.Cell class="text-xs text-muted-foreground">
 									{formatIsoDateFr(user.created_at)}
 								</Table.Cell>
 								<Table.Cell class="pr-4 text-right">

@@ -20,7 +20,7 @@
 </script>
 
 <div class="flex flex-col gap-1">
-	<span class="text-muted-foreground px-1 text-[10px] font-medium tracking-wider uppercase">
+	<span class="px-1 text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
 		Contexte juridique
 	</span>
 	<Select.Root
@@ -34,7 +34,7 @@
 	>
 		<Select.Trigger class="w-full justify-between" aria-label="Sélecteur d'entité juridique">
 			<span class="flex items-center gap-1.5 truncate">
-				<IconBuildingSkyscraper class="text-muted-foreground shrink-0" />
+				<IconBuildingSkyscraper class="shrink-0 text-muted-foreground" />
 				<span class="truncate">{triggerLabel}</span>
 			</span>
 		</Select.Trigger>

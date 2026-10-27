@@ -8,10 +8,17 @@ import { LeaseApiService } from './lease/api';
 import { PaymentApiService } from './payment/api';
 import { PortfolioApiService } from './portfolio/api';
 
-const rawAuthHttpClient = new FetchHttpClient();
+const apiBaseUrl =
+	(typeof import.meta !== 'undefined' &&
+		(import.meta as unknown as { env?: Record<string, string | undefined> }).env
+			?.PUBLIC_API_BASE_URL) ||
+	'';
+
+const rawAuthHttpClient = new FetchHttpClient({ baseUrl: apiBaseUrl });
 const rawAuthService = new AuthApiService(rawAuthHttpClient);
 
 export const httpClient = new FetchHttpClient({
+	baseUrl: apiBaseUrl,
 	getAccessToken: () => authStore.accessToken,
 	refreshSession: async () => {
 		const refreshToken = authStore.refreshToken;

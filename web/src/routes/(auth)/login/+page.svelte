@@ -37,7 +37,7 @@
 			if (err instanceof ApiError && err.status === 403) {
 				isPendingApproval = true;
 				errorMessage =
-					"Votre compte est en attente de validation par un administrateur (SUPER_ADMIN).";
+					'Votre compte est en attente de validation par un administrateur (SUPER_ADMIN).';
 			} else if (err instanceof ApiError) {
 				errorMessage = err.message;
 			} else {
@@ -49,7 +49,7 @@
 	}
 </script>
 
-<div class="bg-background flex min-h-screen flex-col justify-center p-4">
+<div class="flex min-h-screen flex-col justify-center bg-background p-4">
 	<div class="fixed top-4 right-4">
 		<ThemeToggle />
 	</div>
@@ -112,9 +112,9 @@
 		</Card.Content>
 
 		<Card.Footer class="justify-center border-t pt-4">
-			<p class="text-muted-foreground text-xs">
+			<p class="text-xs text-muted-foreground">
 				Pas encore de compte ?
-				<a href="/signup" class="text-primary font-medium underline-offset-4 hover:underline">
+				<a href="/signup" class="font-medium text-primary underline-offset-4 hover:underline">
 					Demander un accès
 				</a>
 			</p>

@@ -198,9 +198,7 @@
 			} catch (err) {
 				if (cancelled) return;
 				errorMessage =
-					err instanceof ApiError
-						? err.message
-						: 'Impossible de charger les baux et locataires.';
+					err instanceof ApiError ? err.message : 'Impossible de charger les baux et locataires.';
 			} finally {
 				if (!cancelled) {
 					isLoading = false;
@@ -511,7 +509,7 @@
 													Lot {lease.lot_id.slice(0, 8)}
 												{/if}
 											</span>
-											<span class="text-muted-foreground text-[11px]">
+											<span class="text-[11px] text-muted-foreground">
 												{entityMap.get(lease.legal_entity_id)?.name ?? ''} · Échéance le
 												{lease.due_day_of_month} du mois
 											</span>
@@ -525,7 +523,7 @@
 									</Table.Cell>
 									<Table.Cell class="text-right font-mono tabular-nums">
 										{formatCentsToEuro(lease.rent_net_cents)}
-										<span class="text-muted-foreground block text-[11px]">
+										<span class="block text-[11px] text-muted-foreground">
 											+ {formatCentsToEuro(lease.charges_cents)} prov.
 										</span>
 									</Table.Cell>
@@ -536,7 +534,7 @@
 											</Badge>
 										{/if}
 										{#if lease.gli_policy_number}
-											<span class="text-muted-foreground block font-mono text-[11px]">
+											<span class="block font-mono text-[11px] text-muted-foreground">
 												GLI {lease.gli_policy_number}
 											</span>
 										{/if}
@@ -573,7 +571,7 @@
 		<Card.Root>
 			<Card.Content class="p-0">
 				{#if tenants.length === 0}
-					<p class="text-muted-foreground px-4 py-6 text-xs">Aucun locataire enregistré.</p>
+					<p class="px-4 py-6 text-xs text-muted-foreground">Aucun locataire enregistré.</p>
 				{:else}
 					<Table.Root>
 						<Table.Header>
@@ -592,10 +590,10 @@
 									<Table.Cell class="text-xs">
 										<span>{tenant.email}</span>
 										{#if tenant.phone}
-											<span class="text-muted-foreground block">{tenant.phone}</span>
+											<span class="block text-muted-foreground">{tenant.phone}</span>
 										{/if}
 									</Table.Cell>
-									<Table.Cell class="text-muted-foreground text-xs">
+									<Table.Cell class="text-xs text-muted-foreground">
 										{tenant.address || '—'}
 									</Table.Cell>
 									<Table.Cell>
@@ -631,7 +629,7 @@
 		<Card.Root>
 			<Card.Content class="p-0">
 				{#if templates.length === 0}
-					<p class="text-muted-foreground px-4 py-6 text-xs">
+					<p class="px-4 py-6 text-xs text-muted-foreground">
 						Aucun modèle documentaire enregistré. Cliquez sur « Nouveau modèle (.docx / HTML) ».
 					</p>
 				{:else}
@@ -793,22 +791,12 @@
 
 					<Field.Field>
 						<Field.Label for="l-charges">Provisions charges (€)</Field.Label>
-						<Input
-							id="l-charges"
-							type="text"
-							inputmode="decimal"
-							bind:value={leaseChargesEuro}
-						/>
+						<Input id="l-charges" type="text" inputmode="decimal" bind:value={leaseChargesEuro} />
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="l-dep">Dépôt garantie (€)</Field.Label>
-						<Input
-							id="l-dep"
-							type="text"
-							inputmode="decimal"
-							bind:value={leaseDepositEuro}
-						/>
+						<Input id="l-dep" type="text" inputmode="decimal" bind:value={leaseDepositEuro} />
 					</Field.Field>
 				</div>
 
@@ -877,12 +865,7 @@
 			<Field.FieldGroup>
 				<Field.Field>
 					<Field.Label for="t-name">Nom complet / Raison sociale</Field.Label>
-					<Input
-						id="t-name"
-						placeholder="Claire Martin"
-						bind:value={tenantFullName}
-						required
-					/>
+					<Input id="t-name" placeholder="Claire Martin" bind:value={tenantFullName} required />
 				</Field.Field>
 
 				<Field.Field>
@@ -898,12 +881,7 @@
 
 				<Field.Field>
 					<Field.Label for="t-phone">Téléphone</Field.Label>
-					<Input
-						id="t-phone"
-						type="tel"
-						placeholder="06 12 34 56 78"
-						bind:value={tenantPhone}
-					/>
+					<Input id="t-phone" type="tel" placeholder="06 12 34 56 78" bind:value={tenantPhone} />
 				</Field.Field>
 
 				<Field.Field>
@@ -930,9 +908,7 @@
 <Sheet.Root bind:open={leaseDocsSheetOpen}>
 	<Sheet.Content side="right" class="w-full overflow-y-auto sm:max-w-lg">
 		<Sheet.Header class="border-b pb-4">
-			<Sheet.Title>
-				Contrat & Coffre-fort documentaire R2
-			</Sheet.Title>
+			<Sheet.Title>Contrat & Coffre-fort documentaire R2</Sheet.Title>
 			<Sheet.Description>
 				Générez un document à partir d'un modèle ou téléversez une pièce justificative (bail signé,
 				attestation d'assurance, RIB).
@@ -981,7 +957,7 @@
 							</Button>
 						</div>
 					{:else}
-						<p class="text-muted-foreground text-xs">Aucun modèle enregistré.</p>
+						<p class="text-xs text-muted-foreground">Aucun modèle enregistré.</p>
 					{/if}
 				</div>
 
@@ -1032,13 +1008,13 @@
 						3. Pièces archivées ({selectedLeaseDocs.length})
 					</h3>
 					{#if selectedLeaseDocs.length === 0}
-						<p class="text-muted-foreground text-xs">Aucune pièce archivée sur ce bail.</p>
+						<p class="text-xs text-muted-foreground">Aucune pièce archivée sur ce bail.</p>
 					{:else}
 						{#each selectedLeaseDocs as doc (doc.id)}
 							<div class="flex items-center justify-between rounded-md border p-2.5 text-xs">
 								<div class="flex min-w-0 flex-col">
 									<span class="truncate font-medium">{doc.file_name}</span>
-									<span class="text-muted-foreground text-[11px]">
+									<span class="text-[11px] text-muted-foreground">
 										{doc.category} · {formatIsoDateFr(doc.created_at)}
 									</span>
 								</div>
@@ -1069,7 +1045,8 @@
 		<Dialog.Header>
 			<Dialog.Title>Enregistrer un modèle de document</Dialog.Title>
 			<Dialog.Description>
-				Supporte les modèles Word <code>.docx</code> avec balises <code>&#123;&#123;variable&#125;&#125;</code>
+				Supporte les modèles Word <code>.docx</code> avec balises
+				<code>&#123;&#123;variable&#125;&#125;</code>
 				et les gabarits HTML convertis en PDF.
 			</Dialog.Description>
 		</Dialog.Header>
@@ -1135,10 +1112,9 @@
 						<textarea
 							id="reg-tpl-html"
 							rows="4"
-							class="border-input bg-background w-full rounded-md border p-2 font-mono text-xs"
+							class="w-full rounded-md border border-input bg-background p-2 font-mono text-xs"
 							bind:value={tplHtmlBody}
-							required
-						></textarea>
+							required></textarea>
 					</Field.Field>
 				{:else}
 					<Field.Field>

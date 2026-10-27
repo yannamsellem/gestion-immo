@@ -52,7 +52,9 @@
 	<Sidebar.Provider>
 		<AppSidebar entities={workspaceStore.entities} {openIncidentsCount} />
 		<Sidebar.Inset>
-			<header class="bg-background/95 sticky top-0 flex h-12 shrink-0 items-center justify-between gap-2 border-b px-4 backdrop-blur">
+			<header
+				class="sticky top-0 flex h-12 shrink-0 items-center justify-between gap-2 border-b bg-background/95 px-4 backdrop-blur"
+			>
 				<div class="flex items-center gap-2">
 					<Sidebar.Trigger />
 					<Separator orientation="vertical" class="h-4" />
@@ -63,7 +65,7 @@
 							Toutes les entités ({workspaceStore.entities.length})
 						{/if}
 					</Badge>
-					<span class="text-muted-foreground hidden text-xs sm:inline">
+					<span class="hidden text-xs text-muted-foreground sm:inline">
 						· Période : {formatPeriodMonthFr(workspaceStore.selectedPeriodMonth)}
 					</span>
 				</div>

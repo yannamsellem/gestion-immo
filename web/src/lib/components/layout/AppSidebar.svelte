@@ -105,7 +105,7 @@
 		<div class="flex items-center justify-between px-1">
 			<div class="flex flex-col">
 				<span class="text-sm font-semibold tracking-tight">Gestion Immo</span>
-				<span class="text-muted-foreground text-[11px]">Back-office Patrimonial</span>
+				<span class="text-[11px] text-muted-foreground">Back-office Patrimonial</span>
 			</div>
 			<Badge variant="secondary">Svelte 5</Badge>
 		</div>
@@ -143,16 +143,11 @@
 			<div class="flex items-center justify-between gap-2">
 				<div class="flex min-w-0 flex-col">
 					<span class="truncate text-xs font-medium">{authStore.user.full_name}</span>
-					<span class="text-muted-foreground truncate text-[11px]">
+					<span class="truncate text-[11px] text-muted-foreground">
 						{authStore.user.email} · {authStore.user.role}
 					</span>
 				</div>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					onclick={handleLogout}
-					aria-label="Se déconnecter"
-				>
+				<Button variant="ghost" size="icon-sm" onclick={handleLogout} aria-label="Se déconnecter">
 					<IconLogout />
 				</Button>
 			</div>

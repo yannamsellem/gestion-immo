@@ -43,7 +43,7 @@
 	}
 </script>
 
-<div class="bg-background flex min-h-screen flex-col justify-center p-4">
+<div class="flex min-h-screen flex-col justify-center bg-background p-4">
 	<div class="fixed top-4 right-4">
 		<ThemeToggle />
 	</div>
@@ -61,8 +61,10 @@
 				<Alert.Root>
 					<Alert.Title>Compte en attente d'approbation (202 Accepted)</Alert.Title>
 					<Alert.Description>
-						Votre demande pour <strong>{submittedEmail}</strong> a bien été enregistrée avec le statut
-						<code>PENDING_APPROVAL</code>. Un administrateur doit l'approuver avant votre première connexion.
+						Votre demande pour <strong>{submittedEmail}</strong> a bien été enregistrée avec le
+						statut
+						<code>PENDING_APPROVAL</code>. Un administrateur doit l'approuver avant votre première
+						connexion.
 					</Alert.Description>
 				</Alert.Root>
 			{:else}
@@ -128,9 +130,9 @@
 		</Card.Content>
 
 		<Card.Footer class="justify-center border-t pt-4">
-			<p class="text-muted-foreground text-xs">
+			<p class="text-xs text-muted-foreground">
 				Déjà approuvé ?
-				<a href="/login" class="text-primary font-medium underline-offset-4 hover:underline">
+				<a href="/login" class="font-medium text-primary underline-offset-4 hover:underline">
 					Retour à la connexion
 				</a>
 			</p>

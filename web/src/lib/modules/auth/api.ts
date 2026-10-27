@@ -51,14 +51,20 @@ export class AuthApiService {
 	}
 
 	approveUser(userId: string): Promise<UserDTO> {
-		return this.http.requestJson<UserDTO>(`/api/v1/admin/users/${encodeURIComponent(userId)}/approve`, {
-			method: 'POST'
-		});
+		return this.http.requestJson<UserDTO>(
+			`/api/v1/admin/users/${encodeURIComponent(userId)}/approve`,
+			{
+				method: 'POST'
+			}
+		);
 	}
 
 	rejectUser(userId: string): Promise<UserDTO> {
-		return this.http.requestJson<UserDTO>(`/api/v1/admin/users/${encodeURIComponent(userId)}/reject`, {
-			method: 'POST'
-		});
+		return this.http.requestJson<UserDTO>(
+			`/api/v1/admin/users/${encodeURIComponent(userId)}/reject`,
+			{
+				method: 'POST'
+			}
+		);
 	}
 }

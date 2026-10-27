@@ -16,7 +16,7 @@
 	<div class="flex flex-col gap-1">
 		<h1 class="text-lg font-semibold tracking-tight">{title}</h1>
 		{#if subtitle}
-			<p class="text-muted-foreground text-xs">{subtitle}</p>
+			<p class="text-xs text-muted-foreground">{subtitle}</p>
 		{/if}
 	</div>
 	{#if actions}

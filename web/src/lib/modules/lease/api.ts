@@ -26,7 +26,8 @@ export class LeaseApiService {
 	}
 
 	listLeases(entityId?: string): Promise<LeaseDTO[]> {
-		const query = entityId && entityId !== 'ALL' ? `?entity_id=${encodeURIComponent(entityId)}` : '';
+		const query =
+			entityId && entityId !== 'ALL' ? `?entity_id=${encodeURIComponent(entityId)}` : '';
 		return this.http.requestJson<LeaseDTO[]>(`/api/v1/leases${query}`);
 	}
 

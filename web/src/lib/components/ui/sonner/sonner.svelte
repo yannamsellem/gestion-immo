@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { mode } from "mode-watcher";
-	import { Toaster as Sonner, type ToasterProps as SonnerProps } from "svelte-sonner";
+	import { mode } from 'mode-watcher';
+	import { Toaster as Sonner, type ToasterProps as SonnerProps } from 'svelte-sonner';
 	import IconLoader from '@tabler/icons-svelte/icons/loader';
 	import IconCircleCheck from '@tabler/icons-svelte/icons/circle-check';
 	import IconAlertOctagon from '@tabler/icons-svelte/icons/alert-octagon';
@@ -16,8 +16,8 @@
 	style="--normal-bg: var(--color-popover); --normal-text: var(--color-popover-foreground); --normal-border: var(--color-border);"
 	toastOptions={{
 		classes: {
-			toast: "cn-toast",
-		},
+			toast: 'cn-toast'
+		}
 	}}
 	{...restProps}
 >

@@ -42,8 +42,9 @@ describe('FetchHttpClient', () => {
 	it('throws ApiError with backend message on non-2xx responses', async () => {
 		const client = new FetchHttpClient({
 			baseUrl: 'http://localhost:8080',
-			fetchFn: vi.fn(async () =>
-				new Response(JSON.stringify({ error: 'account is pending approval' }), { status: 403 })
+			fetchFn: vi.fn(
+				async () =>
+					new Response(JSON.stringify({ error: 'account is pending approval' }), { status: 403 })
 			) as unknown as typeof fetch
 		});
 

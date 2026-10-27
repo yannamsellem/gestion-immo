@@ -305,7 +305,9 @@
 			toast.success('Incident mis à jour.');
 			reloadCounter += 1;
 		} catch (err) {
-			toast.error(err instanceof ApiError ? err.message : 'Impossible de mettre à jour l’incident.');
+			toast.error(
+				err instanceof ApiError ? err.message : 'Impossible de mettre à jour l’incident.'
+			);
 		} finally {
 			isUpdatingIncident = false;
 		}
@@ -370,9 +372,7 @@
 			openInspectionSheet(created);
 			toast.success(`État des lieux ${created.type} initialisé.`);
 		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Impossible de créer l’état des lieux.'
-			);
+			toast.error(err instanceof ApiError ? err.message : 'Impossible de créer l’état des lieux.');
 		} finally {
 			isCreatingInspection = false;
 		}
@@ -424,9 +424,7 @@
 			);
 			toast.success('Relevé pièce par pièce enregistré.');
 		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Impossible d’enregistrer les éléments.'
-			);
+			toast.error(err instanceof ApiError ? err.message : 'Impossible d’enregistrer les éléments.');
 		} finally {
 			isSavingInspectionItems = false;
 		}
@@ -441,9 +439,7 @@
 			activeInspectionReport = report;
 			toast.success('Rapport PDF contradictoire généré.');
 		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Échec de la génération du rapport PDF.'
-			);
+			toast.error(err instanceof ApiError ? err.message : 'Échec de la génération du rapport PDF.');
 		} finally {
 			isGeneratingPdf = false;
 		}
@@ -528,15 +524,12 @@
 						</Table.Header>
 						<Table.Body>
 							{#each incidents as incident (incident.id)}
-								<Table.Row
-									class="cursor-pointer"
-									onclick={() => openEditIncidentSheet(incident)}
-								>
+								<Table.Row class="cursor-pointer" onclick={() => openEditIncidentSheet(incident)}>
 									<Table.Cell class="pl-4 text-xs">
 										{formatIsoDateFr(incident.occurred_at)}
 									</Table.Cell>
 									<Table.Cell class="font-medium">{incident.title}</Table.Cell>
-									<Table.Cell class="text-muted-foreground text-xs">
+									<Table.Cell class="text-xs text-muted-foreground">
 										{#if incident.property_id && propertyMap.get(incident.property_id)}
 											{propertyMap.get(incident.property_id)?.label}
 										{:else if incident.lease_id && leaseMap.get(incident.lease_id)}
@@ -613,10 +606,7 @@
 									<Select.Content>
 										<Select.Group>
 											{#each leases as lease (lease.id)}
-												<Select.Item
-													value={lease.id}
-													label={formatLeaseDisplayLabel(lease)}
-												>
+												<Select.Item value={lease.id} label={formatLeaseDisplayLabel(lease)}>
 													{formatLeaseDisplayLabel(lease)}
 												</Select.Item>
 											{/each}
@@ -734,7 +724,7 @@
 				</Card.Header>
 				<Card.Content class="flex flex-col gap-4">
 					{#if templates.length === 0}
-						<p class="text-muted-foreground text-xs">
+						<p class="text-xs text-muted-foreground">
 							Aucun modèle configuré. Cliquez sur « Nouveau modèle EDL » en haut à droite.
 						</p>
 					{:else}
@@ -743,7 +733,7 @@
 								<div class="flex items-center justify-between rounded-md border p-2.5 text-xs">
 									<div class="flex flex-col gap-0.5">
 										<span class="font-medium">{tpl.name}</span>
-										<span class="text-muted-foreground text-[11px]">
+										<span class="text-[11px] text-muted-foreground">
 											Pièces : {tpl.rooms.join(', ')}
 										</span>
 									</div>
@@ -763,15 +753,11 @@
 										<span class="font-medium">
 											EDL {insp.type} — {formatIsoDateFr(insp.inspection_date)}
 										</span>
-										<span class="text-muted-foreground font-mono text-[11px]">
+										<span class="font-mono text-[11px] text-muted-foreground">
 											ID : {insp.id}
 										</span>
 									</div>
-									<Button
-										size="sm"
-										variant="secondary"
-										onclick={() => openInspectionSheet(insp)}
-									>
+									<Button size="sm" variant="secondary" onclick={() => openInspectionSheet(insp)}>
 										Compléter / PDF →
 									</Button>
 								</div>
@@ -859,11 +845,7 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="inc-claim">N° dossier assurance</Field.Label>
-						<Input
-							id="inc-claim"
-							placeholder="SIN-2026-884"
-							bind:value={newIncidentClaimNumber}
-						/>
+						<Input id="inc-claim" placeholder="SIN-2026-884" bind:value={newIncidentClaimNumber} />
 					</Field.Field>
 
 					<Field.Field>
@@ -972,7 +954,7 @@
 					<div class="flex flex-col gap-2">
 						<span class="text-xs font-semibold uppercase">Historique des observations</span>
 						{#each selectedIncident.observations as obs, index (`${selectedIncident.id}-obs-${index}`)}
-							<div class="bg-muted/40 rounded-md border p-2.5 text-xs">
+							<div class="rounded-md border bg-muted/40 p-2.5 text-xs">
 								{obs}
 							</div>
 						{/each}
@@ -1002,7 +984,7 @@
 						<div class="grid gap-2 rounded-md border p-2.5 sm:grid-cols-12 sm:items-center">
 							<div class="sm:col-span-4">
 								<p class="text-xs font-semibold">{item.room_name}</p>
-								<p class="text-muted-foreground text-[11px]">{item.element_name}</p>
+								<p class="text-[11px] text-muted-foreground">{item.element_name}</p>
 							</div>
 							<div class="sm:col-span-4">
 								<Select.Root
@@ -1065,7 +1047,7 @@
 				</div>
 
 				{#if activeInspectionReport}
-					<div class="bg-muted/40 flex flex-col gap-2 rounded-md border p-3 text-xs">
+					<div class="flex flex-col gap-2 rounded-md border bg-muted/40 p-3 text-xs">
 						<div class="flex items-center justify-between">
 							<span class="font-semibold">Rapport PDF généré</span>
 							{#if activeInspectionReport.download_url}
@@ -1083,9 +1065,9 @@
 						</div>
 
 						{#if activeInspectionReport.degradations && activeInspectionReport.degradations.length > 0}
-							<p class="text-destructive font-medium">
-								{activeInspectionReport.degradations.length} dégradation(s) retenue(s) entre
-								l'entrée et la sortie.
+							<p class="font-medium text-destructive">
+								{activeInspectionReport.degradations.length} dégradation(s) retenue(s) entre l'entrée
+								et la sortie.
 							</p>
 						{/if}
 					</div>

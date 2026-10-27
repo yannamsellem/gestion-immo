@@ -88,6 +88,8 @@
 	let jrnCreditEuro = $state('1200,00');
 	let isSavingJournal = $state(false);
 
+	let previousContextKey = $state('');
+
 	$effect(() => {
 		if (workspaceStore.selectedEntityId !== 'ALL') {
 			activeEntityId = workspaceStore.selectedEntityId;
@@ -125,8 +127,16 @@
 				}
 				activeEntityId = targetEntityId;
 
+				const contextKey = `${targetEntityId}:${year}`;
+				let currentDisabled = disabledLineIds;
+				if (previousContextKey !== contextKey) {
+					previousContextKey = contextKey;
+					disabledLineIds = [];
+					currentDisabled = [];
+				}
+
 				const [preview, entries] = await Promise.all([
-					apiRegistry.accounting.previewStatements(targetEntityId, year, disabledLineIds),
+					apiRegistry.accounting.previewStatements(targetEntityId, year, currentDisabled),
 					apiRegistry.accounting.listJournalEntries(targetEntityId, year)
 				]);
 				if (cancelled) return;
@@ -179,9 +189,7 @@
 				nextDisabled
 			);
 		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Erreur lors du recalcul interactif.'
-			);
+			toast.error(err instanceof ApiError ? err.message : 'Erreur lors du recalcul interactif.');
 		} finally {
 			isRecomputing = false;
 		}
@@ -200,9 +208,7 @@
 			toast.success(`Plaquette des comptes annuels ${fiscalYear} générée.`);
 		} catch (err) {
 			toast.error(
-				err instanceof ApiError
-					? err.message
-					: 'Échec de la génération du PDF des comptes annuels.'
+				err instanceof ApiError ? err.message : 'Échec de la génération du PDF des comptes annuels.'
 			);
 		} finally {
 			isGeneratingPdf = false;
@@ -393,11 +399,7 @@
 			Export FEC (.tsv)
 		</Button>
 
-		<Button
-			size="sm"
-			onclick={handleGeneratePdf}
-			disabled={isGeneratingPdf || !activeEntityId}
-		>
+		<Button size="sm" onclick={handleGeneratePdf} disabled={isGeneratingPdf || !activeEntityId}>
 			{#if isGeneratingPdf}
 				<Spinner data-icon="inline-start" />
 			{:else}
@@ -498,7 +500,7 @@
 						</Card.Title>
 					</Card.Header>
 					<Card.Content>
-						<p class="text-muted-foreground text-xs tabular-nums">
+						<p class="text-xs text-muted-foreground tabular-nums">
 							N-1 : {formatCentsToEuro(statements.total_operating_revenue_n_minus_1_cents)} · EBE :
 							{formatCentsToEuro(statements.gross_operating_surplus_n_cents)}
 						</p>
@@ -513,7 +515,7 @@
 						</Card.Title>
 					</Card.Header>
 					<Card.Content>
-						<p class="text-muted-foreground text-xs tabular-nums">
+						<p class="text-xs text-muted-foreground tabular-nums">
 							Dont dotations amort. : {formatCentsToEuro(statements.total_depreciation_n_cents)}
 						</p>
 					</Card.Content>
@@ -527,7 +529,7 @@
 						</Card.Title>
 					</Card.Header>
 					<Card.Content>
-						<p class="text-muted-foreground text-xs tabular-nums">
+						<p class="text-xs text-muted-foreground tabular-nums">
 							Capacité d'Autofinancement (CAF) :
 							{formatCentsToEuro(statements.self_financing_capacity_n_cents)}
 						</p>
@@ -542,7 +544,7 @@
 						</Card.Title>
 					</Card.Header>
 					<Card.Content>
-						<p class="text-muted-foreground text-xs tabular-nums">
+						<p class="text-xs text-muted-foreground tabular-nums">
 							Capitaux propres & dettes :
 							{formatCentsToEuro(statements.total_equity_and_liabilities_n_cents)}
 						</p>
@@ -551,7 +553,9 @@
 			</div>
 
 			<Card.Root>
-				<Card.Header class="flex flex-col justify-between gap-2 border-b pb-3 sm:flex-row sm:items-center">
+				<Card.Header
+					class="flex flex-col justify-between gap-2 border-b pb-3 sm:flex-row sm:items-center"
+				>
 					<div>
 						<Card.Title class="text-sm font-semibold">
 							Postes du Bilan & Compte de Résultat — Exercice {fiscalYear}
@@ -573,7 +577,7 @@
 
 				<Card.Content class="p-0">
 					{#if statements.lines.length === 0}
-						<p class="text-muted-foreground px-4 py-6 text-xs">
+						<p class="px-4 py-6 text-xs text-muted-foreground">
 							Aucun poste de balance ou écriture comptable sur l'exercice {fiscalYear}. Cliquez sur
 							« Ligne de balance » ou « Nouvelle écriture OD/PCG » pour alimenter les états.
 						</p>
@@ -618,7 +622,7 @@
 										<Table.Cell class="text-right font-mono tabular-nums">
 											{formatCentsToEuro(line.net_n_cents)}
 										</Table.Cell>
-										<Table.Cell class="text-muted-foreground text-right font-mono tabular-nums">
+										<Table.Cell class="text-right font-mono text-muted-foreground tabular-nums">
 											{formatCentsToEuro(line.net_n_minus_1_cents)}
 										</Table.Cell>
 										<Table.Cell class="pr-4 text-right font-mono text-xs tabular-nums">
@@ -652,7 +656,7 @@
 			</Card.Header>
 			<Card.Content class="p-0">
 				{#if journalEntries.length === 0}
-					<p class="text-muted-foreground px-4 py-6 text-xs">
+					<p class="px-4 py-6 text-xs text-muted-foreground">
 						Aucune écriture comptable enregistrée pour l'exercice {fiscalYear}.
 					</p>
 				{:else}
@@ -672,7 +676,7 @@
 								<Table.Row>
 									<Table.Cell class="pl-4 text-xs">
 										<span class="font-medium">{formatIsoDateFr(entry.entry_date)}</span>
-										<span class="text-muted-foreground block font-mono text-[11px]">
+										<span class="block font-mono text-[11px] text-muted-foreground">
 											{entry.entry_number}
 										</span>
 									</Table.Cell>
@@ -682,10 +686,13 @@
 									<Table.Cell class="font-mono text-xs">{entry.document_ref}</Table.Cell>
 									<Table.Cell class="text-xs">
 										<span class="font-semibold">{entry.label}</span>
-										<div class="text-muted-foreground mt-1 flex flex-col gap-0.5 font-mono text-[11px]">
+										<div
+											class="mt-1 flex flex-col gap-0.5 font-mono text-[11px] text-muted-foreground"
+										>
 											{#each entry.lines as line (line.id)}
 												<span>
-													{line.account_code} {line.account_label} :
+													{line.account_code}
+													{line.account_label} :
 													{line.debit_cents > 0
 														? `D ${formatCentsToEuro(line.debit_cents)}`
 														: `C ${formatCentsToEuro(line.credit_cents)}`}
@@ -764,13 +771,7 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="bal-n">Montant Net {fiscalYear} (€)</Field.Label>
-						<Input
-							id="bal-n"
-							type="text"
-							inputmode="decimal"
-							bind:value={balNetNEuro}
-							required
-						/>
+						<Input id="bal-n" type="text" inputmode="decimal" bind:value={balNetNEuro} required />
 					</Field.Field>
 
 					<Field.Field>
@@ -835,12 +836,7 @@
 					<div class="mt-2 grid gap-2 sm:grid-cols-3">
 						<Input placeholder="Compte (681100)" bind:value={jrnDebitAccount} required />
 						<Input placeholder="Libellé compte" bind:value={jrnDebitAccountLabel} required />
-						<Input
-							placeholder="Montant €"
-							inputmode="decimal"
-							bind:value={jrnDebitEuro}
-							required
-						/>
+						<Input placeholder="Montant €" inputmode="decimal" bind:value={jrnDebitEuro} required />
 					</div>
 				</div>
 

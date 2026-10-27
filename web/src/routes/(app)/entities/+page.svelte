@@ -136,7 +136,9 @@
 	});
 
 	const visibleSummaries = $derived(Object.values(summariesByEntity));
-	const focusedSummary = $derived(summariesByEntity[focusedEntityId] ?? visibleSummaries[0] ?? null);
+	const focusedSummary = $derived(
+		summariesByEntity[focusedEntityId] ?? visibleSummaries[0] ?? null
+	);
 
 	const totalAcquisitionCents = $derived(
 		visibleSummaries.reduce((sum, s) => sum + s.total_acquisition_cents, 0)
@@ -147,9 +149,7 @@
 	const totalBookValueCents = $derived(
 		visibleSummaries.reduce((sum, s) => sum + s.total_book_value_cents, 0)
 	);
-	const totalLotsCount = $derived(
-		visibleSummaries.reduce((sum, s) => sum + s.total_lots_count, 0)
-	);
+	const totalLotsCount = $derived(visibleSummaries.reduce((sum, s) => sum + s.total_lots_count, 0));
 
 	function formatEntityTypeLabel(entityType: string): string {
 		return ENTITY_TYPES.find((t) => t.value === entityType)?.label ?? entityType;
@@ -228,9 +228,7 @@
 			shareholderSheetOpen = false;
 			reloadCounter += 1;
 		} catch (err) {
-			toast.error(
-				err instanceof ApiError ? err.message : 'Impossible d’enregistrer l’associé.'
-			);
+			toast.error(err instanceof ApiError ? err.message : 'Impossible d’enregistrer l’associé.');
 		} finally {
 			isSavingShareholder = false;
 		}
@@ -276,7 +274,7 @@
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
-			<p class="text-muted-foreground text-xs">Actifs immobilisés & stocks</p>
+			<p class="text-xs text-muted-foreground">Actifs immobilisés & stocks</p>
 		</Card.Content>
 	</Card.Root>
 
@@ -288,7 +286,7 @@
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
-			<p class="text-muted-foreground text-xs">Travaux capitalisés rattachés</p>
+			<p class="text-xs text-muted-foreground">Travaux capitalisés rattachés</p>
 		</Card.Content>
 	</Card.Root>
 
@@ -300,7 +298,7 @@
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
-			<p class="text-muted-foreground text-xs">Acquisition + Stock travaux</p>
+			<p class="text-xs text-muted-foreground">Acquisition + Stock travaux</p>
 		</Card.Content>
 	</Card.Root>
 
@@ -310,7 +308,7 @@
 			<Card.Title class="text-xl font-semibold tabular-nums">{totalLotsCount}</Card.Title>
 		</Card.Header>
 		<Card.Content>
-			<p class="text-muted-foreground text-xs">Sur {visibleSummaries.length} entité(s)</p>
+			<p class="text-xs text-muted-foreground">Sur {visibleSummaries.length} entité(s)</p>
 		</Card.Content>
 	</Card.Root>
 </div>
@@ -369,7 +367,7 @@
 								<Table.Cell class="pl-4">
 									<div class="flex flex-col">
 										<span class="font-medium">{summary.entity.name}</span>
-										<span class="text-muted-foreground font-mono text-[11px]">
+										<span class="font-mono text-[11px] text-muted-foreground">
 											SIRET {summary.entity.siret || '—'} · NAF {summary.entity.naf_code || '6820B'}
 										</span>
 									</div>
@@ -381,7 +379,7 @@
 								</Table.Cell>
 								<Table.Cell class="text-right font-mono tabular-nums">
 									{formatCentsToEuro(summary.entity.share_capital_cents)}
-									<span class="text-muted-foreground block text-[10px]">
+									<span class="block text-[10px] text-muted-foreground">
 										{summary.entity.total_shares} parts
 									</span>
 								</Table.Cell>
@@ -433,7 +431,7 @@
 			</Card.Header>
 			<Card.Content class="p-0">
 				{#if !focusedSummary || focusedSummary.shareholders.length === 0}
-					<p class="text-muted-foreground px-4 py-6 text-xs">
+					<p class="px-4 py-6 text-xs text-muted-foreground">
 						Aucun associé renseigné pour cette structure.
 					</p>
 				{:else}
@@ -451,7 +449,7 @@
 									<Table.Cell class="pl-4">
 										<div class="flex flex-col">
 											<span class="font-medium">{sh.full_name}</span>
-											<span class="text-muted-foreground text-[11px]">
+											<span class="text-[11px] text-muted-foreground">
 												{sh.shares_count} parts
 											</span>
 										</div>
@@ -521,11 +519,7 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="ent-siret">N° SIRET (14 chiffres)</Field.Label>
-						<Input
-							id="ent-siret"
-							placeholder="89234567800014"
-							bind:value={newSiret}
-						/>
+						<Input id="ent-siret" placeholder="89234567800014" bind:value={newSiret} />
 					</Field.Field>
 
 					<Field.Field>
@@ -559,13 +553,7 @@
 
 					<Field.Field>
 						<Field.Label for="ent-shares">Nombre total de parts</Field.Label>
-						<Input
-							id="ent-shares"
-							type="number"
-							min="1"
-							bind:value={newTotalShares}
-							required
-						/>
+						<Input id="ent-shares" type="number" min="1" bind:value={newTotalShares} required />
 					</Field.Field>
 				</div>
 			</Field.FieldGroup>
@@ -617,44 +605,23 @@
 
 				<Field.Field>
 					<Field.Label for="sh-name">Nom complet ou raison sociale de l'associé</Field.Label>
-					<Input
-						id="sh-name"
-						placeholder="Jean Dupont"
-						bind:value={shFullName}
-						required
-					/>
+					<Input id="sh-name" placeholder="Jean Dupont" bind:value={shFullName} required />
 				</Field.Field>
 
 				<Field.Field>
 					<Field.Label for="sh-shares">Nombre de parts détenues</Field.Label>
-					<Input
-						id="sh-shares"
-						type="number"
-						min="1"
-						bind:value={shSharesCount}
-						required
-					/>
+					<Input id="sh-shares" type="number" min="1" bind:value={shSharesCount} required />
 				</Field.Field>
 
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="sh-cc">Solde compte courant 455 (€)</Field.Label>
-						<Input
-							id="sh-cc"
-							type="text"
-							inputmode="decimal"
-							bind:value={shCurrentAccountEuro}
-						/>
+						<Input id="sh-cc" type="text" inputmode="decimal" bind:value={shCurrentAccountEuro} />
 					</Field.Field>
 
 					<Field.Field>
 						<Field.Label for="sh-rem">Rémunération versée (€)</Field.Label>
-						<Input
-							id="sh-rem"
-							type="text"
-							inputmode="decimal"
-							bind:value={shRemunerationEuro}
-						/>
+						<Input id="sh-rem" type="text" inputmode="decimal" bind:value={shRemunerationEuro} />
 					</Field.Field>
 				</div>
 			</Field.FieldGroup>

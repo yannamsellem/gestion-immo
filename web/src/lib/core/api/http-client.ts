@@ -30,10 +30,30 @@ export class FetchHttpClient implements HttpClient {
 		this.onUnauthorized = options.onUnauthorized;
 	}
 
+	private normalizeHeaders(headersInit?: HeadersInit): Record<string, string> {
+		const normalized: Record<string, string> = {};
+		if (!headersInit) {
+			return normalized;
+		}
+		if (headersInit instanceof Headers) {
+			headersInit.forEach((value, key) => {
+				normalized[key] = value;
+			});
+			return normalized;
+		}
+		if (Array.isArray(headersInit)) {
+			for (const [key, value] of headersInit) {
+				normalized[key] = value;
+			}
+			return normalized;
+		}
+		return { ...headersInit };
+	}
+
 	async requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 		const headers: Record<string, string> = {
 			Accept: 'application/json',
-			...(init.headers as Record<string, string> | undefined)
+			...this.normalizeHeaders(init.headers)
 		};
 		if (init.body && !headers['Content-Type']) {
 			headers['Content-Type'] = 'application/json';
@@ -69,11 +89,13 @@ export class FetchHttpClient implements HttpClient {
 		return (text ? JSON.parse(text) : undefined) as T;
 	}
 
-	private async executeWithRetry(path: string, init: RequestInit, retried = false): Promise<Response> {
+	private async executeWithRetry(
+		path: string,
+		init: RequestInit,
+		retried = false
+	): Promise<Response> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		const headers: Record<string, string> = {
-			...(init.headers as Record<string, string> | undefined)
-		};
+		const headers: Record<string, string> = this.normalizeHeaders(init.headers);
 
 		const token = this.getAccessToken?.();
 		if (token) {
@@ -85,7 +107,12 @@ export class FetchHttpClient implements HttpClient {
 			headers
 		});
 
-		if (response.status === 401 && !retried && this.refreshSession && !path.includes('/api/v1/auth/')) {
+		if (
+			response.status === 401 &&
+			!retried &&
+			this.refreshSession &&
+			!path.includes('/api/v1/auth/')
+		) {
 			const freshToken = await this.coalesceRefresh();
 			if (freshToken) {
 				return this.executeWithRetry(path, init, true);

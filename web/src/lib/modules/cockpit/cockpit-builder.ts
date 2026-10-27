@@ -185,7 +185,7 @@ export function buildCockpitEntityGroups(input: CockpitAggregationInput): Entity
 
 				const isUpToDate =
 					Boolean(rentCall && rentCall.status === 'PAID') &&
-					!negativePosition &&
+					(!negativePosition || negativePosition.total_unpaid_cents <= 0) &&
 					lotIncidents.length === 0;
 
 				rows.push({

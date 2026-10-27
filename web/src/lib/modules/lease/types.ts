@@ -1,9 +1,5 @@
 export type LeaseType =
-	| 'RESIDENTIAL_EMPTY'
-	| 'RESIDENTIAL_FURNISHED'
-	| 'MOBILITY'
-	| 'COMMERCIAL_3_6_9'
-	| string;
+	'RESIDENTIAL_EMPTY' | 'RESIDENTIAL_FURNISHED' | 'MOBILITY' | 'COMMERCIAL_3_6_9' | string;
 
 export type RentCallStatus = 'PENDING' | 'PARTIAL' | 'PAID' | string;
 

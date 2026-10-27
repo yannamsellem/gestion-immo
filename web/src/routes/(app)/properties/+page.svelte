@@ -213,7 +213,7 @@
 			const created = await apiRegistry.portfolio.createLot(lotPropertyId, {
 				label: lotLabel.trim(),
 				lot_type: lotType,
-				surface_m2: Number.parseFloat(lotSurfaceM2) || 0,
+				surface_m2: Math.round(Number.parseFloat(lotSurfaceM2.replace(',', '.'))) || 0,
 				ownership_share: Number.parseInt(lotOwnershipShare, 10) || 100,
 				floor: lotFloor.trim()
 			});
@@ -240,11 +240,7 @@
 				Ajouter un lot
 			</Button>
 		{/if}
-		<Button
-			size="sm"
-			onclick={() => (createPropertyOpen = true)}
-			disabled={entities.length === 0}
-		>
+		<Button size="sm" onclick={() => (createPropertyOpen = true)} disabled={entities.length === 0}>
 			<IconPlus data-icon="inline-start" />
 			Nouveau bien
 		</Button>
@@ -291,7 +287,9 @@
 	<div class="flex flex-col gap-5">
 		{#each properties as prop (prop.id)}
 			<Card.Root>
-				<Card.Header class="flex flex-col justify-between gap-2 border-b pb-3 sm:flex-row sm:items-center">
+				<Card.Header
+					class="flex flex-col justify-between gap-2 border-b pb-3 sm:flex-row sm:items-center"
+				>
 					<div class="flex flex-col gap-1">
 						<div class="flex flex-wrap items-center gap-2">
 							<Card.Title class="text-sm font-semibold">{prop.label}</Card.Title>
@@ -313,16 +311,12 @@
 							<strong class="font-mono font-semibold">
 								{formatCentsToEuro(prop.total_book_value_cents)}
 							</strong>
-							<span class="text-muted-foreground block text-[11px]">
+							<span class="block text-[11px] text-muted-foreground">
 								Acq. {formatCentsToEuro(prop.acquisition_cents)} · Travaux
 								{formatCentsToEuro(prop.work_stock_cents)}
 							</span>
 						</div>
-						<Button
-							size="sm"
-							variant="secondary"
-							onclick={() => openCreateLotForProperty(prop.id)}
-						>
+						<Button size="sm" variant="secondary" onclick={() => openCreateLotForProperty(prop.id)}>
 							<IconPlus data-icon="inline-start" />
 							Ajouter un lot
 						</Button>
@@ -332,14 +326,10 @@
 				<Card.Content class="p-0">
 					{#if !prop.lots || prop.lots.length === 0}
 						<div class="flex items-center justify-between px-4 py-4">
-							<p class="text-muted-foreground text-xs">
+							<p class="text-xs text-muted-foreground">
 								Aucun lot découpé dans ce bien immobilier.
 							</p>
-							<Button
-								size="sm"
-								variant="outline"
-								onclick={() => openCreateLotForProperty(prop.id)}
-							>
+							<Button size="sm" variant="outline" onclick={() => openCreateLotForProperty(prop.id)}>
 								Créer le premier lot →
 							</Button>
 						</div>
@@ -364,7 +354,7 @@
 										<Table.Cell class="text-xs">
 											{LOT_TYPES.find((t) => t.value === lot.lot_type)?.label ?? lot.lot_type}
 										</Table.Cell>
-										<Table.Cell class="text-muted-foreground text-xs">
+										<Table.Cell class="text-xs text-muted-foreground">
 											{lot.floor || '—'}
 										</Table.Cell>
 										<Table.Cell class="text-right font-mono text-xs tabular-nums">
@@ -487,8 +477,7 @@
 							}}
 						>
 							<Select.Trigger class="w-full">
-								{ACCOUNTING_CATEGORIES.find((c) => c.value === propCategory)?.label ??
-									propCategory}
+								{ACCOUNTING_CATEGORIES.find((c) => c.value === propCategory)?.label ?? propCategory}
 							</Select.Trigger>
 							<Select.Content>
 								<Select.Group>
@@ -525,12 +514,7 @@
 
 					<Field.Field>
 						<Field.Label for="prop-work">Stock travaux (€)</Field.Label>
-						<Input
-							id="prop-work"
-							type="text"
-							inputmode="decimal"
-							bind:value={propWorkStockEuro}
-						/>
+						<Input id="prop-work" type="text" inputmode="decimal" bind:value={propWorkStockEuro} />
 					</Field.Field>
 				</div>
 			</Field.FieldGroup>
@@ -621,7 +605,14 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<Field.Field>
 						<Field.Label for="lot-surf">Surface Loi Carrez / Habitable (m²)</Field.Label>
-						<Input id="lot-surf" type="number" step="0.1" bind:value={lotSurfaceM2} required />
+						<Input
+							id="lot-surf"
+							type="number"
+							step="1"
+							min="0"
+							bind:value={lotSurfaceM2}
+							required
+						/>
 					</Field.Field>
 
 					<Field.Field>

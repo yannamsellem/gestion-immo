@@ -1,4 +1,5 @@
-export type TemplateType = 'LEASE_CONTRACT' | 'RENT_CALL' | 'RECEIPT' | 'REMINDER' | 'GLI_NOTICE' | string;
+export type TemplateType =
+	'LEASE_CONTRACT' | 'RENT_CALL' | 'RECEIPT' | 'REMINDER' | 'GLI_NOTICE' | string;
 export type TemplateFormat = 'DOCX' | 'HTML' | string;
 
 export interface RegisterTemplateCmd {

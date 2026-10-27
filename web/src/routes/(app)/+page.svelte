@@ -174,7 +174,7 @@
 >
 	{#snippet actions()}
 		<div class="flex items-center gap-2">
-			<IconCalendarEvent class="text-muted-foreground size-4" />
+			<IconCalendarEvent class="size-4 text-muted-foreground" />
 			<Input
 				type="month"
 				value={workspaceStore.selectedPeriodMonth}
@@ -209,7 +209,7 @@
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
-			<p class="text-muted-foreground text-xs tabular-nums">
+			<p class="text-xs text-muted-foreground tabular-nums">
 				Sur {formatCentsToEuro(totalExpectedCents)} attendus
 			</p>
 		</Card.Content>
@@ -223,7 +223,7 @@
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
-			<p class="text-muted-foreground text-xs">Échéances en attente de règlement</p>
+			<p class="text-xs text-muted-foreground">Échéances en attente de règlement</p>
 		</Card.Content>
 	</Card.Root>
 
@@ -235,7 +235,7 @@
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
-			<p class="text-muted-foreground text-xs">Baux en position débitrice</p>
+			<p class="text-xs text-muted-foreground">Baux en position débitrice</p>
 		</Card.Content>
 	</Card.Root>
 
@@ -247,7 +247,7 @@
 			</Card.Title>
 		</Card.Header>
 		<Card.Content>
-			<p class="text-muted-foreground text-xs">Sinistres ou interventions en cours</p>
+			<p class="text-xs text-muted-foreground">Sinistres ou interventions en cours</p>
 		</Card.Content>
 	</Card.Root>
 </div>
@@ -284,18 +284,21 @@
 	<div class="flex flex-col gap-5">
 		{#each groups as group (group.entity.id)}
 			<Card.Root>
-				<Card.Header class="flex flex-col justify-between gap-3 border-b pb-3 sm:flex-row sm:items-center">
+				<Card.Header
+					class="flex flex-col justify-between gap-3 border-b pb-3 sm:flex-row sm:items-center"
+				>
 					<div class="flex flex-wrap items-center gap-2">
 						<Card.Title class="text-sm font-semibold">{group.entity.name}</Card.Title>
 						<Badge variant="outline">{formatEntityTypeLabel(group.entity.entity_type)}</Badge>
 						{#if group.entity.siret}
-							<span class="text-muted-foreground font-mono text-xs">SIRET {group.entity.siret}</span>
+							<span class="font-mono text-xs text-muted-foreground">SIRET {group.entity.siret}</span
+							>
 						{/if}
 					</div>
 					<div class="flex flex-wrap items-center gap-3">
-						<span class="text-muted-foreground text-xs tabular-nums">
+						<span class="text-xs text-muted-foreground tabular-nums">
 							Encaissé :
-							<strong class="text-foreground font-semibold">
+							<strong class="font-semibold text-foreground">
 								{formatCentsToEuro(group.collectedRentCents)}
 							</strong>
 							/ {formatCentsToEuro(group.expectedRentCents)}
@@ -311,7 +314,7 @@
 				<Card.Content class="p-0">
 					{#if group.rows.length === 0}
 						<div class="flex items-center justify-between px-4 py-6">
-							<p class="text-muted-foreground text-xs">
+							<p class="text-xs text-muted-foreground">
 								Aucun bien immobilier rattaché à cette entité.
 							</p>
 							<Button
@@ -345,7 +348,7 @@
 														— {row.lotLabel}
 													{/if}
 												</span>
-												<span class="text-muted-foreground text-[11px]">
+												<span class="text-[11px] text-muted-foreground">
 													{formatLotTypeLabel(row.lotType)}
 												</span>
 											</div>
@@ -371,7 +374,7 @@
 											{#if row.isVacant}
 												—
 											{:else if row.remainingDueCents > 0}
-												<span class="text-destructive font-semibold">
+												<span class="font-semibold text-destructive">
 													{formatCentsToEuro(row.remainingDueCents)}
 												</span>
 											{:else}
