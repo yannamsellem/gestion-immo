@@ -1,36 +1,22 @@
 <script lang="ts">
-	import { cn } from '$lib/utils';
+	import { cn, type WithElementRef } from "#lib/utils.js";
+	import type { HTMLAttributes } from "svelte/elements";
 
-	export let title = '';
-	export let description = '';
-	let className = '';
-	export { className as class };
+	let {
+		ref = $bindable(null),
+		class: className,
+		children,
+		size = "default",
+		...restProps
+	}: WithElementRef<HTMLAttributes<HTMLDivElement>> & { size?: "default" | "sm" } = $props();
 </script>
 
 <div
-	class={cn('rounded-xl border border-slate-200 bg-white text-slate-950 shadow-sm', className)}
-	{...$$restProps}
+	bind:this={ref}
+	data-slot="card"
+	data-size={size}
+	class={cn("ring-foreground/10 bg-card text-card-foreground gap-(--card-spacing) overflow-hidden rounded-lg py-(--card-spacing) text-xs/relaxed ring-1 [--card-spacing:--spacing(4)] has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] *:[img:first-child]:rounded-t-lg *:[img:last-child]:rounded-b-lg group/card flex flex-col", className)}
+	{...restProps}
 >
-	{#if title || description || $$slots.header}
-		<div class="flex flex-col space-y-1.5 border-b border-slate-100 p-6">
-			{#if $$slots.header}
-				<slot name="header" />
-			{:else}
-				{#if title}
-					<h3 class="text-lg font-semibold leading-none tracking-tight">{title}</h3>
-				{/if}
-				{#if description}
-					<p class="text-sm text-slate-500">{description}</p>
-				{/if}
-			{/if}
-		</div>
-	{/if}
-	<div class="p-6">
-		<slot />
-	</div>
-	{#if $$slots.footer}
-		<div class="flex items-center border-t border-slate-100 p-6 pt-4">
-			<slot name="footer" />
-		</div>
-	{/if}
+	{@render children?.()}
 </div>

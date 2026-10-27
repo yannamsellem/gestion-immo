@@ -1,27 +1,49 @@
-<script lang="ts">
-	import { cn } from '$lib/utils';
+<script lang="ts" module>
+	import { type VariantProps, tv } from "tailwind-variants";
 
-	export let variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' = 'default';
-	let className = '';
-	export { className as class };
+	export const badgeVariants = tv({
+		base: "h-5 gap-1 rounded-full border border-transparent px-2 py-0.5 text-[0.625rem] font-medium transition-all has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&>svg]:size-2.5! group/badge inline-flex w-fit shrink-0 items-center justify-center overflow-hidden whitespace-nowrap focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none",
+		variants: {
+			variant: {
+				default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+				secondary: "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
+				destructive: "bg-destructive/10 [a]:hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 text-destructive dark:bg-destructive/20",
+				outline: "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground bg-input/20 dark:bg-input/30",
+				ghost: "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
+				link: "text-primary underline-offset-4 hover:underline",
+			},
+		},
+		defaultVariants: {
+			variant: "default",
+		},
+	});
 
-	const variantStyles: Record<typeof variant, string> = {
-		default: 'bg-blue-600 text-white border-transparent',
-		secondary: 'bg-slate-100 text-slate-900 border-transparent',
-		destructive: 'bg-red-100 text-red-800 border-red-200',
-		outline: 'border-slate-300 text-slate-700 bg-white',
-		success: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-		warning: 'bg-amber-100 text-amber-800 border-amber-200'
-	};
+	export type BadgeVariant = VariantProps<typeof badgeVariants>["variant"];
 </script>
 
-<span
-	class={cn(
-		'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors',
-		variantStyles[variant],
-		className
-	)}
-	{...$$restProps}
+<script lang="ts">
+	import { cn, type WithElementRef } from "#lib/utils.js";
+	import type { HTMLAnchorAttributes } from "svelte/elements";
+
+	let {
+		ref = $bindable(null),
+		href,
+		class: className,
+		variant = "default",
+		children,
+		...restProps
+	}: WithElementRef<HTMLAnchorAttributes> & {
+		variant?: BadgeVariant;
+	} = $props();
+</script>
+
+<svelte:element
+	this={href ? "a" : "span"}
+	bind:this={ref}
+	data-slot="badge"
+	{href}
+	class={cn(badgeVariants({ variant }), className)}
+	{...restProps}
 >
-	<slot />
-</span>
+	{@render children?.()}
+</svelte:element>
