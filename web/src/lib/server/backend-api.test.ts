@@ -94,7 +94,7 @@ describe('createBackendApi (openapi-fetch)', () => {
 						refresh_token: 'rotated-refresh-token',
 						token_type: 'Bearer',
 						user: {
-							id: 'usr_1',
+							id: '0192dce0-7c4a-7004-8000-000000000001',
 							full_name: 'Admin User',
 							email: 'admin@example.com',
 							role: 'SUPER_ADMIN',
@@ -112,7 +112,7 @@ describe('createBackendApi (openapi-fetch)', () => {
 			return new Response(
 				JSON.stringify([
 					{
-						id: 'ent_1',
+						id: '0192dce0-7c4a-7004-8000-000000000002',
 						name: 'SCI Alpha',
 						entity_type: 'SCI_IS',
 						siret: '12345678900010',
@@ -181,7 +181,7 @@ describe('createBackendApi (openapi-fetch)', () => {
 			cookies: {
 				[ACCESS_TOKEN_COOKIE]: 'expired-access-token',
 				[REFRESH_TOKEN_COOKIE]: 'expired-refresh-token',
-				[USER_COOKIE]: '{"id":"usr_1"}'
+				[USER_COOKIE]: '{"id":"0192dce0-7c4a-7004-8000-000000000001"}'
 			},
 			fetchFn: fetchMock
 		});

@@ -7,6 +7,7 @@
 	import * as Empty from '#lib/components/ui/empty/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { formatIsoDateFr } from '#lib/core/formatters/date';
+	import { formatShortId } from '#lib/core/formatters/id';
 	import { formatCentsToEuro } from '#lib/core/formatters/money';
 	import {
 		formatIncidentStatusLabel,
@@ -38,7 +39,7 @@
 
 	function formatLeaseDisplayLabel(lease: LeaseDTO): string {
 		const tenant = tenantMap.get(lease.tenant_id);
-		return `${tenant?.full_name ?? 'Locataire'} (Bail ${lease.id.slice(0, 6)})`;
+		return `${tenant?.full_name ?? 'Locataire'} (Bail ${formatShortId(lease.id, 6)})`;
 	}
 </script>
 

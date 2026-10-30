@@ -778,7 +778,9 @@ export interface components {
 			file_name: string;
 			/** Format: int64 */
 			fiscal_year: number;
+			/** Format: uuid */
 			id: string;
+			/** Format: uuid */
 			legal_entity_id: string;
 			/** Format: int64 */
 			net_income_n_cents: number;
@@ -787,6 +789,7 @@ export interface components {
 			size_bytes: number;
 		};
 		AssembleGLIDossierBody: {
+			/** Format: uuid */
 			lease_id: string;
 			template_id?: string;
 		};
@@ -797,6 +800,7 @@ export interface components {
 			user: components['schemas']['UserDTO'];
 		};
 		BatchImportResultDTO: {
+			/** Format: uuid */
 			entity_id: string;
 			/** Format: int64 */
 			imported_count: number;
@@ -816,9 +820,12 @@ export interface components {
 			/** Format: date-time */
 			entry_date: string;
 			entry_type: string;
+			/** Format: uuid */
 			id: string;
 			label: string;
+			/** Format: uuid */
 			legal_entity_id: string;
+			/** Format: uuid */
 			payment_id?: string;
 			receipt_number?: string;
 		};
@@ -993,8 +1000,10 @@ export interface components {
 			keys_description?: string;
 			/** Format: int64 */
 			keys_handed_over_count?: number;
+			/** Format: uuid */
 			lease_id: string;
 			meter_readings?: components['schemas']['MeterReadings'];
+			/** Format: uuid */
 			template_id?: string;
 			type: string;
 		};
@@ -1012,7 +1021,9 @@ export interface components {
 			gli_policy_number?: string;
 			guarantor_name?: string;
 			lease_type: string;
+			/** Format: uuid */
 			legal_entity_id: string;
+			/** Format: uuid */
 			lot_id: string;
 			/** Format: int64 */
 			rent_net_cents: number;
@@ -1020,6 +1031,7 @@ export interface components {
 			security_deposit_cents?: number;
 			start_date?: string;
 			subject_to_vat?: boolean;
+			/** Format: uuid */
 			tenant_id: string;
 			/** Format: int64 */
 			vat_rate_basis_points?: number;
@@ -1041,6 +1053,7 @@ export interface components {
 			lot_type?: string;
 			/** Format: int64 */
 			ownership_share?: number;
+			/** Format: uuid */
 			property_id?: string;
 			/** Format: int64 */
 			surface_m2?: number;
@@ -1054,6 +1067,7 @@ export interface components {
 			acquisition_cents?: number;
 			address?: string;
 			label: string;
+			/** Format: uuid */
 			legal_entity_id?: string;
 			property_type?: string;
 			/** Format: int64 */
@@ -1070,6 +1084,7 @@ export interface components {
 			created_at: string;
 			format: string;
 			html_body?: string;
+			/** Format: uuid */
 			id: string;
 			name: string;
 			r2_key?: string;
@@ -1132,9 +1147,12 @@ export interface components {
 			created_at: string;
 			download_url: string;
 			gli_policy_number: string;
+			/** Format: uuid */
 			id: string;
 			included_files: string[];
+			/** Format: uuid */
 			lease_id: string;
+			/** Format: uuid */
 			legal_entity_id: string;
 			template_id: string;
 			tenant_name: string;
@@ -1151,6 +1169,7 @@ export interface components {
 					[key: string]: string;
 				}[];
 			};
+			/** Format: uuid */
 			template_id: string;
 			variables?: {
 				[key: string]: string;
@@ -1164,6 +1183,7 @@ export interface components {
 			created_at: string;
 			/** Format: int64 */
 			estimated_cost_cents: number;
+			/** Format: uuid */
 			id: string;
 			insurance_claim_number?: string;
 			lease_id?: string;
@@ -1180,19 +1200,23 @@ export interface components {
 		InspectionDTO: {
 			/** Format: date-time */
 			created_at: string;
+			/** Format: uuid */
 			entry_inspection_id?: string;
 			/** Format: int64 */
 			estimated_repair_cost_cents?: number;
+			/** Format: uuid */
 			id: string;
 			inspection_date: string;
 			items: components['schemas']['InspectionItemDTO'][];
 			keys_description?: string;
 			/** Format: int64 */
 			keys_handed_over_count?: number;
+			/** Format: uuid */
 			lease_id: string;
 			meter_readings?: components['schemas']['MeterReadings'];
 			report_download_url?: string;
 			report_pdf_r2_key?: string;
+			/** Format: uuid */
 			template_id: string;
 			type: string;
 			/** Format: date-time */
@@ -1201,7 +1225,9 @@ export interface components {
 		InspectionItemDTO: {
 			condition: string;
 			element_name: string;
+			/** Format: uuid */
 			id: string;
+			/** Format: uuid */
 			inspection_id: string;
 			observation?: string;
 			photo_r2_keys: string[];
@@ -1218,12 +1244,15 @@ export interface components {
 			comparisons?: components['schemas']['ElementComparisonDTO'][];
 			degradations?: components['schemas']['ElementComparisonDTO'][];
 			download_url: string;
+			/** Format: uuid */
 			entry_inspection_id?: string;
 			/** Format: date-time */
 			generated_at: string;
 			has_entry_comparison: boolean;
+			/** Format: uuid */
 			inspection_id: string;
 			items: components['schemas']['InspectionItemDTO'][];
+			/** Format: uuid */
 			lease_id: string;
 			pdf_r2_key: string;
 			type: string;
@@ -1232,6 +1261,7 @@ export interface components {
 			/** Format: date-time */
 			created_at: string;
 			default_elements: string[];
+			/** Format: uuid */
 			id: string;
 			name: string;
 			rooms: string[];
@@ -1247,10 +1277,12 @@ export interface components {
 			entry_number: string;
 			/** Format: int64 */
 			fiscal_year: number;
+			/** Format: uuid */
 			id: string;
 			journal_code: string;
 			journal_label: string;
 			label: string;
+			/** Format: uuid */
 			legal_entity_id: string;
 			lines: components['schemas']['JournalLineDTO'][];
 			/** Format: int64 */
@@ -1266,6 +1298,7 @@ export interface components {
 			credit_cents: number;
 			/** Format: int64 */
 			debit_cents: number;
+			/** Format: uuid */
 			id: string;
 			label: string;
 			line_id?: string;
@@ -1307,9 +1340,12 @@ export interface components {
 			end_date?: string;
 			gli_policy_number: string;
 			guarantor_name: string;
+			/** Format: uuid */
 			id: string;
 			lease_type: string;
+			/** Format: uuid */
 			legal_entity_id: string;
+			/** Format: uuid */
 			lot_id: string;
 			/** Format: int64 */
 			rent_net_cents: number;
@@ -1318,6 +1354,7 @@ export interface components {
 			/** Format: date-time */
 			start_date: string;
 			subject_to_vat: boolean;
+			/** Format: uuid */
 			tenant_id: string;
 			/** Format: date-time */
 			updated_at: string;
@@ -1329,6 +1366,7 @@ export interface components {
 			/** Format: date-time */
 			created_at: string;
 			entity_type: string;
+			/** Format: uuid */
 			id: string;
 			naf_code: string;
 			name: string;
@@ -1348,11 +1386,13 @@ export interface components {
 			/** Format: date-time */
 			created_at: string;
 			floor: string;
+			/** Format: uuid */
 			id: string;
 			label: string;
 			lot_type: string;
 			/** Format: int64 */
 			ownership_share: number;
+			/** Format: uuid */
 			property_id: string;
 			/** Format: int64 */
 			surface_m2: number;
@@ -1376,11 +1416,15 @@ export interface components {
 		NegativePositionDTO: {
 			gli_eligible: boolean;
 			gli_policy_number: string;
+			/** Format: uuid */
 			lease_id: string;
+			/** Format: uuid */
 			legal_entity_id: string;
+			/** Format: uuid */
 			lot_id: string;
 			/** Format: date-time */
 			oldest_due_date: string;
+			/** Format: uuid */
 			tenant_id: string;
 			tenant_name: string;
 			/** Format: int64 */
@@ -1391,18 +1435,23 @@ export interface components {
 			allocations: components['schemas']['RentAllocation'][];
 			/** Format: int64 */
 			amount_cents: number;
+			/** Format: uuid */
 			cash_journal_entry_id?: string;
 			/** Format: date-time */
 			created_at: string;
 			external_ref?: string;
+			/** Format: uuid */
 			id: string;
 			label: string;
+			/** Format: uuid */
 			lease_id: string;
+			/** Format: uuid */
 			legal_entity_id: string;
 			method: string;
 			/** Format: date-time */
 			payment_date: string;
 			receipt_number?: string;
+			/** Format: uuid */
 			tenant_id: string;
 			/** Format: int64 */
 			unallocated_cents: number;
@@ -1414,8 +1463,10 @@ export interface components {
 			address: string;
 			/** Format: date-time */
 			created_at: string;
+			/** Format: uuid */
 			id: string;
 			label: string;
+			/** Format: uuid */
 			legal_entity_id: string;
 			lots?: components['schemas']['LotDTO'][];
 			property_type: string;
@@ -1431,6 +1482,7 @@ export interface components {
 			amount_cents: number;
 			external_ref?: string;
 			label: string;
+			/** Format: uuid */
 			lease_id: string;
 			method?: string;
 			payment_date?: string;
@@ -1440,12 +1492,14 @@ export interface components {
 			amount_cents: number;
 			entry_date?: string;
 			label: string;
+			/** Format: uuid */
 			legal_entity_id: string;
 		};
 		RecordCashPaymentCmd: {
 			/** Format: int64 */
 			amount_cents: number;
 			label: string;
+			/** Format: uuid */
 			lease_id: string;
 			payment_date?: string;
 			receipt_number?: string;
@@ -1479,9 +1533,12 @@ export interface components {
 			applied_cents: number;
 			/** Format: date-time */
 			created_at: string;
+			/** Format: uuid */
 			id: string;
+			/** Format: uuid */
 			payment_id: string;
 			period_month: string;
+			/** Format: uuid */
 			rent_call_id: string;
 		};
 		RentCallDTO: {
@@ -1491,8 +1548,11 @@ export interface components {
 			created_at: string;
 			/** Format: date-time */
 			due_date: string;
+			/** Format: uuid */
 			id: string;
+			/** Format: uuid */
 			lease_id: string;
+			/** Format: uuid */
 			legal_entity_id: string;
 			period_month: string;
 			/** Format: int64 */
@@ -1500,6 +1560,7 @@ export interface components {
 			/** Format: int64 */
 			rent_net_cents: number;
 			status: string;
+			/** Format: uuid */
 			tenant_id: string;
 			/** Format: int64 */
 			total_due_cents: number;
@@ -1516,7 +1577,9 @@ export interface components {
 			/** Format: int64 */
 			detention_basis_points: number;
 			full_name: string;
+			/** Format: uuid */
 			id: string;
+			/** Format: uuid */
 			legal_entity_id: string;
 			/** Format: int64 */
 			remuneration_paid_cents: number;
@@ -1537,6 +1600,7 @@ export interface components {
 			created_at: string;
 			download_url: string;
 			file_name: string;
+			/** Format: uuid */
 			id: string;
 			lease_id?: string;
 			legal_entity_id?: string;
@@ -1553,6 +1617,7 @@ export interface components {
 			created_at: string;
 			email: string;
 			full_name: string;
+			/** Format: uuid */
 			id: string;
 			phone: string;
 			/** Format: date-time */
@@ -1563,6 +1628,7 @@ export interface components {
 			add_photo_r2_keys?: string[];
 			/** Format: int64 */
 			estimated_cost_cents?: number;
+			/** Format: uuid */
 			incident_id?: string;
 			insurance_claim_number?: string;
 			observations?: string[];
@@ -1578,6 +1644,7 @@ export interface components {
 			/** Format: int64 */
 			current_account_cents?: number;
 			full_name: string;
+			/** Format: uuid */
 			legal_entity_id?: string;
 			/** Format: int64 */
 			remuneration_paid_cents?: number;
@@ -1587,11 +1654,13 @@ export interface components {
 		UserDTO: {
 			/** Format: date-time */
 			approved_at?: string;
+			/** Format: uuid */
 			approved_by?: string;
 			/** Format: date-time */
 			created_at: string;
 			email: string;
 			full_name: string;
+			/** Format: uuid */
 			id: string;
 			role: string;
 			status: string;
@@ -3222,7 +3291,9 @@ export interface operations {
 				'application/json': {
 					csv?: string;
 					csv_content: string;
+					/** Format: uuid */
 					entity_id: string;
+					/** Format: uuid */
 					legal_entity_id?: string;
 				};
 				'text/csv': string;

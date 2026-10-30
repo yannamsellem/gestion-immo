@@ -1,3 +1,4 @@
+import { formatShortId } from '#lib/core/formatters/id';
 import type { LeaseDTO, RentCallDTO, TenantDTO } from '#lib/modules/lease/types';
 import type { NegativePositionDTO } from '#lib/modules/payment/types';
 import type { LegalEntityDTO, PropertyDTO } from '#lib/modules/portfolio/types';
@@ -105,7 +106,8 @@ export function buildUnifiedRentRows(params: {
 			return {
 				lease,
 				entity,
-				propertyAndLotLabel: lotLabelMap.get(lease.lot_id) ?? `Lot ${lease.lot_id.slice(0, 8)}`,
+				propertyAndLotLabel:
+					lotLabelMap.get(lease.lot_id) ?? `Lot ${formatShortId(lease.lot_id, 8)}`,
 				tenantName: tenantMap.get(lease.tenant_id)?.full_name ?? 'Locataire',
 				rentCall,
 				negativePosition,

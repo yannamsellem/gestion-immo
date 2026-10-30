@@ -94,7 +94,9 @@ describe('persistent onboarding accessibility & async completion contract', () =
 
 		try {
 			let settled = false;
-			const resultPromise = Promise.resolve(workspaceStore.setEntityId('ent_new')).then(() => {
+			const resultPromise = Promise.resolve(
+				workspaceStore.setEntityId('0192dce0-7c4a-7003-8000-000000000001')
+			).then(() => {
 				settled = true;
 			});
 

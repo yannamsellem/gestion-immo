@@ -26,10 +26,20 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 	});
 
 	it('computes integer VAT/gross rent, categorizes PAID/OVERDUE/TO_COLLECT, and summarizes totals', () => {
+		const entityId = '0192dce0-7c4a-7001-8000-000000000001';
+		const propId = '0192dce0-7c4a-7001-8000-000000000002';
+		const lot1Id = '0192dce0-7c4a-7001-8000-111122223333';
+		const lot2Id = '0192dce0-7c4a-7001-8000-9999a2b3c4d5';
+		const lease1Id = '0192dce0-7c4a-7001-8000-000000000011';
+		const lease2Id = '0192dce0-7c4a-7001-8000-000000000012';
+		const tenant1Id = '0192dce0-7c4a-7001-8000-000000000021';
+		const tenant2Id = '0192dce0-7c4a-7001-8000-000000000022';
+		const rentCall2Id = '0192dce0-7c4a-7001-8000-000000000032';
+
 		const rows = buildUnifiedRentRows({
 			entities: [
 				{
-					id: 'ent_1',
+					id: entityId,
 					name: 'SCI Rivoli',
 					entity_type: 'SCI_IS',
 					siret: '12345678900011',
@@ -43,10 +53,10 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 			],
 			leases: [
 				{
-					id: 'lease_1',
-					legal_entity_id: 'ent_1',
-					lot_id: 'lot_1',
-					tenant_id: 'ten_1',
+					id: lease1Id,
+					legal_entity_id: entityId,
+					lot_id: lot1Id,
+					tenant_id: tenant1Id,
 					lease_type: 'COMMERCIAL_3_6_9',
 					rent_net_cents: 100000,
 					charges_cents: 15000,
@@ -62,10 +72,10 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 					updated_at: '2026-01-01T00:00:00Z'
 				},
 				{
-					id: 'lease_2',
-					legal_entity_id: 'ent_1',
-					lot_id: 'lot_2',
-					tenant_id: 'ten_2',
+					id: lease2Id,
+					legal_entity_id: entityId,
+					lot_id: lot2Id,
+					tenant_id: tenant2Id,
 					lease_type: 'RESIDENTIAL_UNFURNISHED',
 					rent_net_cents: 80000,
 					charges_cents: 5000,
@@ -83,7 +93,7 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 			],
 			tenants: [
 				{
-					id: 'ten_1',
+					id: tenant1Id,
 					full_name: 'Boutique SAS',
 					email: 'contact@boutique.fr',
 					phone: '0102030405',
@@ -94,10 +104,10 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 				}
 			],
 			propertiesByEntity: {
-				ent_1: [
+				[entityId]: [
 					{
-						id: 'prop_1',
-						legal_entity_id: 'ent_1',
+						id: propId,
+						legal_entity_id: entityId,
 						label: 'Immeuble Rivoli',
 						property_type: 'BUILDING',
 						accounting_category: 'FIXED_ASSET',
@@ -107,8 +117,8 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 						total_book_value_cents: 50000000,
 						lots: [
 							{
-								id: 'lot_1',
-								property_id: 'prop_1',
+								id: lot1Id,
+								property_id: propId,
 								label: 'RDC Commercial',
 								lot_type: 'COMMERCIAL',
 								surface_m2: 65,
@@ -124,12 +134,12 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 				]
 			},
 			rentCallsByEntity: {
-				ent_1: [
+				[entityId]: [
 					{
-						id: 'rc_2',
-						lease_id: 'lease_2',
-						legal_entity_id: 'ent_1',
-						tenant_id: 'ten_2',
+						id: rentCall2Id,
+						lease_id: lease2Id,
+						legal_entity_id: entityId,
+						tenant_id: tenant2Id,
 						period_month: '2026-10',
 						due_date: '2026-10-05T00:00:00Z',
 						rent_net_cents: 80000,
@@ -144,12 +154,12 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 				]
 			},
 			negativePositionsByEntity: {
-				ent_1: [
+				[entityId]: [
 					{
-						lease_id: 'lease_1',
-						legal_entity_id: 'ent_1',
-						lot_id: 'lot_1',
-						tenant_id: 'ten_1',
+						lease_id: lease1Id,
+						legal_entity_id: entityId,
+						lot_id: lot1Id,
+						tenant_id: tenant1Id,
 						tenant_name: 'Boutique SAS',
 						total_unpaid_cents: 135000,
 						unpaid_months: ['2026-10'],
@@ -169,6 +179,7 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 		expect(rows[0].propertyAndLotLabel).toBe('Immeuble Rivoli — RDC Commercial');
 		expect(rows[1].statusCategory).toBe('PAID');
 		expect(rows[1].remainingDueCents).toBe(0);
+		expect(rows[1].propertyAndLotLabel).toBe('Lot a2b3c4d5');
 
 		expect(summarizeRentRows(rows)).toEqual({
 			expectedTotalCents: 220000,

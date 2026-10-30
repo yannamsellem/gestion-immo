@@ -8,6 +8,7 @@
 	import * as Empty from '#lib/components/ui/empty/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { formatIsoDateFr } from '#lib/core/formatters/date';
+	import { formatShortId } from '#lib/core/formatters/id';
 	import { formatInspectionTypeLabel } from '#lib/modules/inspection/labels';
 	import type { InspectionDTO, InspectionTemplateDTO } from '#lib/modules/inspection/types';
 	import type { LeaseDTO, TenantDTO } from '#lib/modules/lease/types';
@@ -34,7 +35,7 @@
 
 	function formatLeaseDisplayLabel(lease: LeaseDTO): string {
 		const tenant = tenantMap.get(lease.tenant_id);
-		return `${tenant?.full_name ?? 'Locataire'} (Bail ${lease.id.slice(0, 6)})`;
+		return `${tenant?.full_name ?? 'Locataire'} (Bail ${formatShortId(lease.id, 6)})`;
 	}
 </script>
 
@@ -89,7 +90,7 @@
 								</Badge>
 							</Table.Cell>
 							<Table.Cell class="font-medium">
-								{lease ? formatLeaseDisplayLabel(lease) : inspection.lease_id.slice(0, 8)}
+								{lease ? formatLeaseDisplayLabel(lease) : formatShortId(inspection.lease_id, 8)}
 							</Table.Cell>
 							<Table.Cell class="text-xs text-muted-foreground">
 								{template?.name ?? 'Grille standard'}

@@ -10,6 +10,7 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import * as Select from '#lib/components/ui/select/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
+	import { formatShortId } from '#lib/core/formatters/id';
 	import type { IncidentDTO } from '#lib/modules/inspection/types';
 	import type { LeaseDTO, TenantDTO } from '#lib/modules/lease/types';
 	import type { PropertyDTO } from '#lib/modules/portfolio/types';
@@ -49,7 +50,7 @@
 
 	function formatLeaseDisplayLabel(lease: LeaseDTO): string {
 		const tenant = tenantMap.get(lease.tenant_id);
-		return `${tenant?.full_name ?? 'Locataire'} (Bail ${lease.id.slice(0, 6)})`;
+		return `${tenant?.full_name ?? 'Locataire'} (Bail ${formatShortId(lease.id, 6)})`;
 	}
 
 	function resetForm(): void {

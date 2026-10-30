@@ -13,6 +13,7 @@
 	import * as Select from '#lib/components/ui/select/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import { formatIsoDateFr } from '#lib/core/formatters/date';
+	import { formatShortId } from '#lib/core/formatters/id';
 	import {
 		formatInspectionTypeLabel,
 		INSPECTION_TYPE_OPTIONS
@@ -79,7 +80,7 @@
 
 	function formatLeaseDisplayLabel(lease: LeaseDTO): string {
 		const tenant = tenantMap.get(lease.tenant_id);
-		return `${tenant?.full_name ?? 'Locataire'} (Bail ${lease.id.slice(0, 6)})`;
+		return `${tenant?.full_name ?? 'Locataire'} (Bail ${formatShortId(lease.id, 6)})`;
 	}
 
 	function resetForm(): void {
@@ -285,7 +286,7 @@
 										(item) => item.id === entryInspectionId
 									)}
 									{entryInsp
-										? `EDL Entrant du ${formatIsoDateFr(entryInsp.inspection_date)} (${entryInsp.id.slice(0, 8)})`
+										? `EDL Entrant du ${formatIsoDateFr(entryInsp.inspection_date)} (${formatShortId(entryInsp.id, 8)})`
 										: entryInspectionId}
 								{:else}
 									Aucun EDL d’entrée rattaché (rapport autonome)

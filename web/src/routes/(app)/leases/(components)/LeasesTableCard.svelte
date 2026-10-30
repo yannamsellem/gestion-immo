@@ -7,6 +7,7 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Empty from '#lib/components/ui/empty/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
+	import { formatShortId } from '#lib/core/formatters/id';
 	import { formatBasisPointsToPercent, formatCentsToEuro } from '#lib/core/formatters/money';
 	import { formatLeaseTypeLabel } from '#lib/modules/lease/labels';
 	import type { LeaseDTO, TenantDTO } from '#lib/modules/lease/types';
@@ -87,7 +88,7 @@
 										{#if lotInfo}
 											{lotInfo.property.label} — {lotInfo.lot.label}
 										{:else}
-											Lot {lease.lot_id.slice(0, 8)}
+											Lot {formatShortId(lease.lot_id, 8)}
 										{/if}
 									</span>
 									<span class="text-[11px] text-muted-foreground">
