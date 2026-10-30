@@ -29,17 +29,16 @@ Because entity identifiers are exposed across REST URLs (`/api/v1/entities/{id}`
 
 ### Goals
 1. **Upgrade PostgreSQL to `postgres:18-alpine`** for both `postgres` and `pg-backup` services in `api/docker-compose.yml` (adopting PostgreSQL 18's `/var/lib/postgresql` container volume mount path) and update project documentation (`README.md`).
-2. **Rewrite `api/migrations/` cleanly (`001` through `006`, removing `007`)** so all 20 entity tables use native `UUID PRIMARY KEY DEFAULT uuidv7()`, all optional entity links become real nullable `UUID REFERENCES ... ON DELETE SET NULL` columns, every foreign-key column is indexed, and dead `pcg_accounts` DDL is eliminated.
-3. **Replace `id.Generate(prefix)` with stdlib-only RFC 9562 `id.NewV7()` and `id.IsValidUUID()`** in `api/internal/platform/id` (zero third-party UUID dependency).
+2. **Rewrite `api/migrations/` cleanly (`001` through `006`, removing `007`)** so all 24 SQL tables use native `UUID PRIMARY KEY DEFAULT uuidv7()`, all optional entity links become real nullable `UUID REFERENCES ... ON DELETE SET NULL` columns, every foreign-key column is indexed, and dead `pcg_accounts` DDL is eliminated.
+3. **Replace `id.Generate(prefix)` with `github.com/google/uuid` (`v1.6.0+`) encapsulated behind `id.NewV7()`, `id.MustNewV7()`, and `id.IsValidUUID()`** in `api/internal/platform/id` (providing sub-millisecond monotonic RFC 9562 `UUIDv7` generation while keeping domain/application layers decoupled from external packages).
 4. **Enforce SRP for non-entity tokens and human references:**
-   - Move prefixed bearer token secret generation (`mcp_live_<32-hex>`, `rt_live_<32-hex>`) to `api/internal/platform/secret`.
+   - Move bearer token secret generation to `api/internal/platform/secret` using 32 random bytes (`256` bits / `64` hex chars via idiomatic `make([]byte, 32)`): unprefixed `secret.GenerateToken()` for opaque HTTP refresh tokens, and prefixed `secret.GeneratePrefixedToken("mcp_live")` for human-configured MCP Personal Access Tokens.
    - Generate human-readable cash receipt suffixes (`CAISSE-YYYYMMDD-<6-hex>`) locally inside `api/internal/modules/payment/application` without coupling to `internal/platform/id`.
 5. **Guarantee LSP & HTTP 4xx Error Semantics (`22P02` / `UUIDCodec` safety):** Ensure malformed UUID inputs never reach `pgx/v5`'s binary `UUIDCodec` or trigger PostgreSQL SQLSTATE `22P02` as HTTP `500 Internal Server Error`, behaving identically across `memory` and `postgres` repositories.
 6. **Synchronize OpenAPI 3.1 & Frontend (`web/`):** Annotate required UUID parameters and DTO fields with `format:"uuid"`, regenerate `web/src/lib/core/api/openapi.json` and `web/src/lib/core/api/openapi.d.ts`, and replace timestamp-prefix `.slice(0, 6)` / `.slice(0, 8)` UI truncations with a trailing-random-hex `formatShortId` helper.
 
 ### Non-Goals
 - Writing in-place `ALTER TABLE ... ALTER COLUMN ... TYPE UUID` data-migration scripts for pre-existing PostgreSQL 16 volumes (greenfield pre-deployment reset).
-- Introducing a third-party Go dependency (`github.com/google/uuid` or `github.com/gofrs/uuid`).
 - Converting business codes or domain slugs (`account_code`, `journal_code`, `siret`, `receipt_number`, PCG/CERFA statement slugs `line_id` / `disabled_line_ids`, or the SvelteKit `'ALL'` entity filter cookie sentinel) into UUIDs.
 
 ### Anti-Goals (Failure Conditions Even If Happy-Path Tests Pass)
@@ -79,31 +78,25 @@ Because entity identifiers are exposed across REST URLs (`/api/v1/entities/{id}`
 
 ### 4.2 Go Platform Packages (`id`, `secret`, `postgres`)
 
-#### 4.2.1 `api/internal/platform/id` (RFC 9562 `UUIDv7` + Validation)
-Remove `Generate(prefix string)` completely and expose:
+#### 4.2.1 `api/internal/platform/id` (RFC 9562 `UUIDv7` via `github.com/google/uuid`)
+Add `github.com/google/uuid` (`v1.6.0+`, zero transitive dependencies) to `api/go.mod`, encapsulate it strictly inside `api/internal/platform/id`, remove `Generate(prefix string)` completely, and expose:
 - **`NewV7() (string, error)`**:
-  - Reads 16 bytes:
-    - Bytes `0..5` (48 bits): big-endian `uint64(time.Now().UTC().UnixMilli())`.
-    - Bytes `6..15` (80 bits): filled from `crypto/rand.Read`.
-    - Byte `6`: `(b[6] & 0x0f) | 0x70` (RFC 9562 version `7`, preserving 4 random bits in `rand_a` high nibble + 8 random bits in byte `7` = 12-bit `rand_a`).
-    - Byte `8`: `(b[8] & 0x3f) | 0x80` (RFC 9562 variant `0b10`, preserving 62 random bits across bytes `8..15` = `rand_b`).
-  - Encodes into canonical lowercase 36-character `8-4-4-4-12` ASCII string (`xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx`) using a stack-allocated `[36]byte` buffer and `encoding/hex.Encode` (zero `fmt.Sprintf` heap reflection).
+  - Delegates to `uuid.NewV7()` (providing RFC 9562 48-bit Unix millisecond timestamp + sub-millisecond monotonic sequencing + CSPRNG entropy) and returns `u.String()` (canonical lowercase 36-character `8-4-4-4-12` format).
 - **`MustNewV7() string`**:
-  - Calls `NewV7()` and panics only if the OS CSPRNG fails; convenient for deterministic-shape unit/integration test setup.
+  - Calls `NewV7()` and panics only if the OS CSPRNG fails; convenient for unit/integration test fixtures.
 - **`IsValidUUID(s string) bool`**:
-  - Validates canonical 36-character `8-4-4-4-12` hexadecimal UUID syntax (hyphens at indices `8, 13, 18, 23` and valid ASCII hex `[0-9a-fA-F]` in all 32 nibble positions).
-  - Accepts any valid RFC 4122 / RFC 9562 UUID string (case-insensitive hex, though `NewV7()` and PostgreSQL always emit lowercase) and rejects empty strings, whitespace, braces, or legacy prefixed IDs (`ent_...`).
+  - Enforces strict canonical 36-character `8-4-4-4-12` UUID syntax: `len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-' && uuid.Validate(s) == nil` (rejecting non-canonical `urn:uuid:...`, `{...}`, or 32-char hyphenless forms that `uuid.Validate` alone accepts, as well as empty strings, whitespace, or legacy prefixed IDs `ent_...`).
 - **Unit tests (`api/internal/platform/id/id_test.go`):**
-  - Verify 36-char format, version nibble `'7'` at index `14`, variant nibble `{'8','9','a','b'}` at index `19`, lexicographical non-decreasing order across increasing timestamps, uniqueness across 10,000 generated IDs, and `IsValidUUID` table-driven edge cases.
+  - Verify 36-char canonical format, version nibble `'7'` at index `14`, variant nibble `{'8','9','a','b'}` at index `19`, strict monotonic lexicographical ordering across rapid consecutive calls within the same millisecond, uniqueness across 10,000 generated IDs, and `IsValidUUID` table-driven edge cases (including rejection of `urn:uuid:...`, `{...}`, and 32-char hex).
 
-#### 4.2.2 `api/internal/platform/secret` (Prefixed Bearer Tokens)
-Add `api/internal/platform/secret/token.go` (+ `secret_test.go`):
+#### 4.2.2 `api/internal/platform/secret` (Bearer & API Token Generation)
+Add `api/internal/platform/secret/token.go` (+ `secret_test.go`) using idiomatic slice allocation (`bytes := make([]byte, 32)` → 256 bits of `crypto/rand` entropy encoded as 64 lowercase hex characters via `hex.EncodeToString(bytes)`):
+- **`GenerateToken() (string, error)`**:
+  - Generates an unprefixed 64-character hex cryptographic secret (`32` random bytes).
+  - Used by `api/internal/modules/auth/application/service.go` for opaque HTTP refresh tokens (which live strictly in `HttpOnly` cookies / auth refresh payloads and do not need a human prefix).
 - **`GeneratePrefixedToken(prefix string) (string, error)`**:
-  - Validates `strings.TrimSpace(prefix) != ""`.
-  - Reads 16 bytes (128 bits) from `crypto/rand.Read` and returns `<prefix>_<32-lowercase-hex>`.
-  - Used exclusively by `api/internal/modules/auth/application/service.go` for:
-    - `secret.GeneratePrefixedToken("mcp_live")` (MCP Personal Access Token raw secret).
-    - `secret.GeneratePrefixedToken("rt_live")` (HTTP refresh token raw secret).
+  - Validates `strings.TrimSpace(prefix) != ""`, calls `GenerateToken()`, and returns `fmt.Sprintf("%s_%s", trimmedPrefix, raw)`.
+  - Used exclusively by `api/internal/modules/auth/application/service.go` for `secret.GeneratePrefixedToken("mcp_live")` (human-configured MCP Personal Access Tokens where a recognizable secret-scanning prefix is valuable).
 
 #### 4.2.3 `api/internal/platform/postgres` (Nullable UUID & `PgError` Helpers)
 Add `api/internal/platform/postgres/uuid.go` (builder's call on exact filename inside `internal/platform/postgres`):
@@ -168,11 +161,11 @@ Every entity table uses `id UUID PRIMARY KEY DEFAULT uuidv7()`.
    - `document`: `templateID`, `storedFileID` (`2` sites), `gliDossierID`.
    - `inspection`: `templateID`, `inspectionID` (replaces `"edl"`), `inspectionItemID` (replaces `"edli"`), `incidentID`.
    - `accounting`: `journalEntryID`, `journalLineID`, `annualAccountReportID`, plus `AccountBalanceRepo` / `memory.AccountBalanceRepo` when `line.ID == ""` (replace `fmt.Sprintf("%s_%d_%s", entityID, fiscalYear, line.LineID)` with `id.NewV7()` so new balance lines receive a valid `UUIDv7`, while `ON CONFLICT (legal_entity_id, fiscal_year, line_id) DO UPDATE` keeps the existing row's `id` intact).
-2. **2 Bearer Secret Call Sites (`auth/application/service.go`) → `secret.GeneratePrefixedToken(...)`:**
-   - `secret.GeneratePrefixedToken("mcp_live")`
-   - `secret.GeneratePrefixedToken("rt_live")`
+2. **2 Bearer Secret Call Sites (`auth/application/service.go`) → `internal/platform/secret`:**
+   - `secret.GeneratePrefixedToken("mcp_live")` (MCP Personal Access Token)
+   - `secret.GenerateToken()` (unprefixed 256-bit HTTP refresh token; also update sample string in `auth/infrastructure/security_test.go`)
 3. **1 Cash Receipt Number Call Site (`payment/application/service.go`) → Local Helper:**
-   - Extract `generateCashReceiptSuffix() (string, error)` inside `payment/application` reading `3` random bytes (`crypto/rand`) encoded as `6` uppercase hex characters (`CAISSE-YYYYMMDD-A1B2C3`), decoupling human receipt numbers from `internal/platform/id`.
+   - Extract `generateCashReceiptSuffix() (string, error)` inside `payment/application` using `bytes := make([]byte, 3)` (`crypto/rand`) encoded as `6` uppercase hex characters (`CAISSE-YYYYMMDD-A1B2C3`), decoupling human receipt numbers from `internal/platform/id`.
 4. **R2 Scope Validation, Default GLI Template Sentinel Removal, and Pre-Upload Entity Check:**
    - In `document/application/service.go`: replace `isSafeScopeID(leaseID)` and `isSafeScopeID(entityID)` with `id.IsValidUUID(leaseID)` and `id.IsValidUUID(entityID)` and delete the dead `isSafeScopeID` helper (`AGENTS.md` Rule 5).
    - In `document/application/service.go` (`resolveGLIDocxTemplate`) *(My Call)*:
