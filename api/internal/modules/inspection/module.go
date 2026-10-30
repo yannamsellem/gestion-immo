@@ -3,6 +3,7 @@ package inspection
 import (
 	"net/http"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/inspection/application"
@@ -58,6 +59,11 @@ func (m *Module) Service() *application.Service {
 // RegisterHTTPRoutes mounts all inspection and incident REST HTTP routes onto mux.
 func (m *Module) RegisterHTTPRoutes(mux *http.ServeMux) {
 	m.handler.RegisterRoutes(mux)
+}
+
+// RegisterHumaRoutes mounts all inspection and incident REST routes onto api.
+func (m *Module) RegisterHumaRoutes(api huma.API) {
+	m.handler.RegisterHumaRoutes(api)
 }
 
 // RegisterMCPTools registers all inspection and incident MCP tools onto reg.

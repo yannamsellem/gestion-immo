@@ -35,7 +35,7 @@ type InspectionTemplateDTO struct {
 // CreateInspectionCmd carries the input for starting a Move-In (ENTRANT) or Move-Out (SORTANT) inspection.
 type CreateInspectionCmd struct {
 	LeaseID                  string               `json:"lease_id"`
-	TemplateID               string               `json:"template_id"`
+	TemplateID               string               `json:"template_id,omitempty"`
 	Type                     string               `json:"type"`
 	EntryInspectionID        *string              `json:"entry_inspection_id,omitempty"`
 	InspectionDate           string               `json:"inspection_date,omitempty"`
@@ -126,7 +126,7 @@ type CreateIncidentCmd struct {
 
 // UpdateIncidentCmd carries the input for updating an incident's status, claim number, cost, observations, or photos.
 type UpdateIncidentCmd struct {
-	IncidentID           string             `json:"incident_id"`
+	IncidentID           string             `json:"incident_id,omitempty"`
 	Status               string             `json:"status,omitempty"`
 	InsuranceClaimNumber *string            `json:"insurance_claim_number,omitempty"`
 	EstimatedCostCents   *money.AmountCents `json:"estimated_cost_cents,omitempty"`

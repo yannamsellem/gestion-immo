@@ -30,8 +30,8 @@ type JournalLineInput struct {
 	SubAccountLabel            string            `json:"sub_account_label,omitempty"`
 	Section                    string            `json:"section,omitempty"`
 	Label                      string            `json:"label,omitempty"`
-	DebitCents                 money.AmountCents `json:"debit_cents"`
-	CreditCents                money.AmountCents `json:"credit_cents"`
+	DebitCents                 money.AmountCents `json:"debit_cents,omitempty"`
+	CreditCents                money.AmountCents `json:"credit_cents,omitempty"`
 	NetNMinus1Cents            money.AmountCents `json:"net_n_minus_1_cents,omitempty"`
 	ReconciliationCode         string            `json:"reconciliation_code,omitempty"`
 	ReconciliationDate         string            `json:"reconciliation_date,omitempty"`
@@ -53,7 +53,7 @@ type RecordExpenseInvoiceCmd struct {
 
 // RecordJournalEntryCmd carries the input for recording a balanced double-entry PCG journal entry.
 type RecordJournalEntryCmd struct {
-	LegalEntityID  string             `json:"legal_entity_id"`
+	LegalEntityID  string             `json:"legal_entity_id,omitempty"`
 	FiscalYear     int                `json:"fiscal_year,omitempty"`
 	JournalCode    string             `json:"journal_code,omitempty"`
 	JournalLabel   string             `json:"journal_label,omitempty"`
@@ -100,8 +100,8 @@ type JournalEntryDTO struct {
 	CreatedAt        time.Time         `json:"created_at"`
 }
 
-// StoredFileDTO represents a generated Annual Accounts and Tax Return PDF stored on Cloudflare R2.
-type StoredFileDTO struct {
+// AnnualAccountReportDTO represents a generated Annual Accounts and Tax Return PDF stored on Cloudflare R2.
+type AnnualAccountReportDTO struct {
 	ID              string            `json:"id"`
 	LegalEntityID   string            `json:"legal_entity_id"`
 	FiscalYear      int               `json:"fiscal_year"`
@@ -115,6 +115,9 @@ type StoredFileDTO struct {
 	NetIncomeNCents money.AmountCents `json:"net_income_n_cents"`
 	CreatedAt       time.Time         `json:"created_at"`
 }
+
+// StoredFileDTO is an alias for AnnualAccountReportDTO.
+type StoredFileDTO = AnnualAccountReportDTO
 
 // Service orchestrates PCG double-entry accounting, dynamic financial statement previews,
 // Annual Accounts and Tax Return PDF generation, and normative DGFiP FEC exports.

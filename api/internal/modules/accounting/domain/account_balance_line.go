@@ -80,12 +80,12 @@ type AccountBalanceLine struct {
 	LineID              string            `json:"line_id"`
 	AccountCode         string            `json:"account_code"`
 	Label               string            `json:"label"`
-	Section             string            `json:"section"`
+	Section             string            `json:"section,omitempty"`
 	CerfaCode           string            `json:"cerfa_code,omitempty"`
 	GrossNCents         money.AmountCents `json:"gross_n_cents,omitempty"`
 	DepreciationNCents  money.AmountCents `json:"depreciation_n_cents,omitempty"`
 	NetNCents           money.AmountCents `json:"net_n_cents"`
-	NetNMinus1Cents     money.AmountCents `json:"net_n_minus_1_cents"`
+	NetNMinus1Cents     money.AmountCents `json:"net_n_minus_1_cents,omitempty"`
 }
 
 // AccountBalanceRepository defines the persistence contract for AccountBalanceLine aggregates.

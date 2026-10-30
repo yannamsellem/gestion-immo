@@ -2,11 +2,15 @@ package httpx_test
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/yannamsellem/gestion-immo/internal/platform/httpx"
 )
@@ -77,5 +81,41 @@ func TestRequestLogger_LogsAndRecoversPanic(t *testing.T) {
 	panicLogged := logBuf.String()
 	if !strings.Contains(panicLogged, "unexpected boom") || !strings.Contains(panicLogged, `"status":500`) {
 		t.Fatalf("expected panic log and status 500 log, got: %s", panicLogged)
+	}
+}
+
+func TestNewHumaAPI_PreservesErrorJSONEnvelopeAndExportsOpenAPI(t *testing.T) {
+	mux := http.NewServeMux()
+	api := httpx.NewHumaAPI(mux)
+
+	type pingOutput struct {
+		Body struct {
+			Status string `json:"status"`
+		}
+	}
+	huma.Register(api, huma.Operation{
+		OperationID: "pingTest",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/ping",
+	}, func(_ context.Context, _ *struct{}) (*pingOutput, error) {
+		return nil, httpx.StatusError(http.StatusUnprocessableEntity, "invalid domain input")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ping", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", rec.Code)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal error payload: %v", err)
+	}
+	if payload["error"] != "invalid domain input" {
+		t.Fatalf("expected error field 'invalid domain input', got %v", payload["error"])
+	}
+	if api.OpenAPI().Paths["/api/v1/ping"] == nil {
+		t.Fatal("expected /api/v1/ping in OpenAPI spec")
 	}
 }

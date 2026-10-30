@@ -1,8 +1,13 @@
 package http
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/application"
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
@@ -25,227 +30,336 @@ func NewHandler(svc *application.Service, jwtSvc *infrastructure.JwtService) *Ha
 	}
 }
 
-type signupRequest struct {
-	FullName string `json:"full_name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+// SignupRequest represents the JSON request body for user registration.
+type SignupRequest struct {
+	FullName string `json:"full_name" required:"true"`
+	Email    string `json:"email" required:"true"`
+	Password string `json:"password" required:"true"`
 }
 
-type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+// LoginRequest represents the JSON request body for email/password authentication.
+type LoginRequest struct {
+	Email    string `json:"email" required:"true"`
+	Password string `json:"password" required:"true"`
 }
 
-type refreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
+// RefreshRequest represents the JSON request body for token refresh and logout.
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token" required:"true"`
 }
 
-type createMCPTokenRequest struct {
-	Label string `json:"label"`
+// CreateMCPTokenRequest represents the JSON request body for creating an MCP bearer token.
+type CreateMCPTokenRequest struct {
+	Label string `json:"label,omitempty"`
 }
 
-type authTokensResponse struct {
+// AuthTokensResponse represents the JSON response containing access/refresh tokens and user profile.
+type AuthTokensResponse struct {
 	AccessToken  string              `json:"access_token"`
 	RefreshToken string              `json:"refresh_token"`
 	TokenType    string              `json:"token_type"`
 	User         application.UserDTO `json:"user"`
 }
 
-type mcpTokenResponse struct {
+// MCPTokenResponse represents the JSON response containing a newly generated MCP token.
+type MCPTokenResponse struct {
 	Token string `json:"token"`
 	Label string `json:"label"`
 }
 
+type signupInput struct {
+	Body SignupRequest
+}
+
+type userOutput struct {
+	Body application.UserDTO
+}
+
+type loginInput struct {
+	Body LoginRequest
+}
+
+type authTokensOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         AuthTokensResponse
+}
+
+type refreshInput struct {
+	Body RefreshRequest
+}
+
+type createMCPTokenInput struct {
+	Authorization string `header:"Authorization"`
+	RawBody       []byte
+	Body          *CreateMCPTokenRequest `required:"false"`
+}
+
+type mcpTokenOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         MCPTokenResponse
+}
+
+type authHeaderInput struct {
+	Authorization string `header:"Authorization"`
+}
+
+type userListOutput struct {
+	Body []application.UserDTO
+}
+
+type userDecisionInput struct {
+	Authorization string `header:"Authorization"`
+	ID            string `path:"id"`
+}
+
 // RegisterRoutes mounts all auth and admin user-approval endpoints onto mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/auth/signup", h.handleSignup)
-	mux.HandleFunc("POST /api/v1/auth/login", h.handleLogin)
-	mux.HandleFunc("POST /api/v1/auth/refresh", h.handleRefresh)
-	mux.HandleFunc("POST /api/v1/auth/logout", h.handleLogout)
-	mux.HandleFunc("POST /api/v1/auth/mcp-tokens", RequireAuthFunc(h.jwtSvc, h.handleCreateMCPToken))
-
-	mux.HandleFunc("GET /api/v1/admin/users/pending", RequireSuperAdminFunc(h.jwtSvc, h.handleListPendingUsers))
-	mux.HandleFunc("POST /api/v1/admin/users/{id}/approve", RequireSuperAdminFunc(h.jwtSvc, h.handleApproveUser))
-	mux.HandleFunc("POST /api/v1/admin/users/{id}/reject", RequireSuperAdminFunc(h.jwtSvc, h.handleRejectUser))
+	h.RegisterHumaRoutes(httpx.NewHumaAPI(mux))
 }
 
-func (h *Handler) handleSignup(w http.ResponseWriter, r *http.Request) {
-	var req signupRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
+// RegisterHumaRoutes registers all auth and admin user-approval endpoints onto a Huma API.
+func (h *Handler) RegisterHumaRoutes(api huma.API) {
+	bearerSecurity := []map[string][]string{{"bearerAuth": {}}}
 
-	userDTO, err := h.svc.Signup(r.Context(), application.SignupCommand{
-		FullName: req.FullName,
-		Email:    req.Email,
-		Password: secret.New(req.Password),
+	huma.Register(api, huma.Operation{
+		OperationID:   "signup",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/auth/signup",
+		Summary:       "Request a new user account (created in PENDING_APPROVAL status)",
+		DefaultStatus: http.StatusAccepted,
+		Tags:          []string{"Auth"},
+	}, h.handleSignup)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "login",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/auth/login",
+		Summary:       "Authenticate with email and password",
+		DefaultStatus: http.StatusOK,
+		Tags:          []string{"Auth"},
+	}, h.handleLogin)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "refresh",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/auth/refresh",
+		Summary:       "Rotate refresh token and issue a new access token",
+		DefaultStatus: http.StatusOK,
+		Tags:          []string{"Auth"},
+	}, h.handleRefresh)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "logout",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/auth/logout",
+		Summary:       "Revoke refresh token session",
+		DefaultStatus: http.StatusNoContent,
+		Tags:          []string{"Auth"},
+	}, h.handleLogout)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "createMcpToken",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/auth/mcp-tokens",
+		Summary:       "Create a personal MCP bearer token",
+		DefaultStatus: http.StatusCreated,
+		Security:      bearerSecurity,
+		Tags:          []string{"Auth"},
+	}, h.handleCreateMCPToken)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "listPendingUsers",
+		Method:        http.MethodGet,
+		Path:          "/api/v1/admin/users/pending",
+		Summary:       "List user accounts awaiting SUPER_ADMIN approval",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Auth"},
+	}, h.handleListPendingUsers)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "approveUser",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/admin/users/{id}/approve",
+		Summary:       "Approve a pending user account",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Auth"},
+	}, h.handleApproveUser)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "rejectUser",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/admin/users/{id}/reject",
+		Summary:       "Reject a user account and revoke active refresh tokens",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Auth"},
+	}, h.handleRejectUser)
+}
+
+func (h *Handler) handleSignup(ctx context.Context, in *signupInput) (*userOutput, error) {
+	userDTO, err := h.svc.Signup(ctx, application.SignupCommand{
+		FullName: in.Body.FullName,
+		Email:    in.Body.Email,
+		Password: secret.New(in.Body.Password),
 	})
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	// 202 Accepted: account created in PENDING_APPROVAL status, awaiting SUPER_ADMIN approval.
-	httpx.Accepted(w, userDTO)
+	return &userOutput{Body: userDTO}, nil
 }
 
-func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var req loginRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
-
-	tokens, err := h.svc.Login(r.Context(), application.LoginCommand{
-		Email:    req.Email,
-		Password: secret.New(req.Password),
+func (h *Handler) handleLogin(ctx context.Context, in *loginInput) (*authTokensOutput, error) {
+	tokens, err := h.svc.Login(ctx, application.LoginCommand{
+		Email:    in.Body.Email,
+		Password: secret.New(in.Body.Password),
 	})
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	w.Header().Set("Cache-Control", "no-store")
-	httpx.OK(w, authTokensResponse{
-		AccessToken:  tokens.AccessToken.Value(),
-		RefreshToken: tokens.RefreshToken.Value(),
-		TokenType:    tokens.TokenType,
-		User:         tokens.User,
-	})
+	return &authTokensOutput{
+		CacheControl: "no-store",
+		Body: AuthTokensResponse{
+			AccessToken:  tokens.AccessToken.Value(),
+			RefreshToken: tokens.RefreshToken.Value(),
+			TokenType:    tokens.TokenType,
+			User:         tokens.User,
+		},
+	}, nil
 }
 
-func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
-
-	tokens, err := h.svc.Refresh(r.Context(), secret.New(req.RefreshToken))
+func (h *Handler) handleRefresh(ctx context.Context, in *refreshInput) (*authTokensOutput, error) {
+	tokens, err := h.svc.Refresh(ctx, secret.New(in.Body.RefreshToken))
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	w.Header().Set("Cache-Control", "no-store")
-	httpx.OK(w, authTokensResponse{
-		AccessToken:  tokens.AccessToken.Value(),
-		RefreshToken: tokens.RefreshToken.Value(),
-		TokenType:    tokens.TokenType,
-		User:         tokens.User,
-	})
+	return &authTokensOutput{
+		CacheControl: "no-store",
+		Body: AuthTokensResponse{
+			AccessToken:  tokens.AccessToken.Value(),
+			RefreshToken: tokens.RefreshToken.Value(),
+			TokenType:    tokens.TokenType,
+			User:         tokens.User,
+		},
+	}, nil
 }
 
-func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
+func (h *Handler) handleLogout(ctx context.Context, in *refreshInput) (*struct{}, error) {
+	if err := h.svc.Logout(ctx, secret.New(in.Body.RefreshToken)); err != nil {
+		return nil, mapDomainError(err)
 	}
-
-	if err := h.svc.Logout(r.Context(), secret.New(req.RefreshToken)); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	httpx.NoContent(w)
+	return &struct{}{}, nil
 }
 
-func (h *Handler) handleCreateMCPToken(w http.ResponseWriter, r *http.Request) {
-	claims, ok := ClaimsFromContext(r.Context())
-	if !ok {
-		httpx.Unauthorized(w, "authentication required")
-		return
+func (h *Handler) handleCreateMCPToken(ctx context.Context, in *createMCPTokenInput) (*mcpTokenOutput, error) {
+	claims, err := h.authenticate(ctx, in.Authorization, false)
+	if err != nil {
+		return nil, err
 	}
 
-	var req createMCPTokenRequest
-	if r.ContentLength != 0 {
-		if err := httpx.DecodeJSON(r, &req); err != nil {
-			httpx.BadRequest(w, err.Error())
-			return
+	label := ""
+	if in.Body != nil {
+		label = in.Body.Label
+	} else if len(strings.TrimSpace(string(in.RawBody))) > 0 {
+		var parsed CreateMCPTokenRequest
+		if err := json.Unmarshal(in.RawBody, &parsed); err != nil {
+			return nil, httpx.StatusError(http.StatusBadRequest, "invalid JSON payload")
 		}
+		label = parsed.Label
 	}
 
-	rawToken, err := h.svc.CreateMCPToken(r.Context(), claims.UserID, req.Label)
+	rawToken, err := h.svc.CreateMCPToken(ctx, claims.UserID, label)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
 
-	w.Header().Set("Cache-Control", "no-store")
-	httpx.Created(w, mcpTokenResponse{
-		Token: rawToken.Value(),
-		Label: req.Label,
-	})
+	return &mcpTokenOutput{
+		CacheControl: "no-store",
+		Body: MCPTokenResponse{
+			Token: rawToken.Value(),
+			Label: label,
+		},
+	}, nil
 }
 
-func (h *Handler) handleListPendingUsers(w http.ResponseWriter, r *http.Request) {
-	claims, ok := ClaimsFromContext(r.Context())
-	if !ok {
-		httpx.Unauthorized(w, "authentication required")
-		return
+func (h *Handler) handleListPendingUsers(ctx context.Context, in *authHeaderInput) (*userListOutput, error) {
+	claims, err := h.authenticate(ctx, in.Authorization, true)
+	if err != nil {
+		return nil, err
 	}
 
-	users, err := h.svc.ListPendingUsers(r.Context(), claims.UserID)
+	users, err := h.svc.ListPendingUsers(ctx, claims.UserID)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
 	if users == nil {
 		users = []application.UserDTO{}
 	}
-
-	httpx.OK(w, users)
+	return &userListOutput{Body: users}, nil
 }
 
-func (h *Handler) handleApproveUser(w http.ResponseWriter, r *http.Request) {
-	claims, ok := ClaimsFromContext(r.Context())
-	if !ok {
-		httpx.Unauthorized(w, "authentication required")
-		return
-	}
-
-	targetID := r.PathValue("id")
-	approved, err := h.svc.ApproveUser(r.Context(), claims.UserID, targetID)
+func (h *Handler) handleApproveUser(ctx context.Context, in *userDecisionInput) (*userOutput, error) {
+	claims, err := h.authenticate(ctx, in.Authorization, true)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, err
 	}
 
-	httpx.OK(w, approved)
-}
-
-func (h *Handler) handleRejectUser(w http.ResponseWriter, r *http.Request) {
-	claims, ok := ClaimsFromContext(r.Context())
-	if !ok {
-		httpx.Unauthorized(w, "authentication required")
-		return
-	}
-
-	targetID := r.PathValue("id")
-	rejected, err := h.svc.RejectUser(r.Context(), claims.UserID, targetID)
+	approved, err := h.svc.ApproveUser(ctx, claims.UserID, in.ID)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.OK(w, rejected)
+	return &userOutput{Body: approved}, nil
 }
 
-func writeDomainError(w http.ResponseWriter, err error) {
+func (h *Handler) handleRejectUser(ctx context.Context, in *userDecisionInput) (*userOutput, error) {
+	claims, err := h.authenticate(ctx, in.Authorization, true)
+	if err != nil {
+		return nil, err
+	}
+
+	rejected, err := h.svc.RejectUser(ctx, claims.UserID, in.ID)
+	if err != nil {
+		return nil, mapDomainError(err)
+	}
+	return &userOutput{Body: rejected}, nil
+}
+
+func (h *Handler) authenticate(ctx context.Context, authHeader string, requireSuperAdmin bool) (*domain.Claims, error) {
+	claims, ok := ClaimsFromContext(ctx)
+	if !ok {
+		rawToken := extractBearer(authHeader)
+		if rawToken == "" || h.jwtSvc == nil {
+			return nil, httpx.StatusError(http.StatusUnauthorized, "missing or invalid Authorization Bearer token")
+		}
+		validated, err := h.jwtSvc.ValidateAccessToken(rawToken)
+		if err != nil {
+			return nil, httpx.StatusError(http.StatusUnauthorized, "invalid or expired access token")
+		}
+		claims = validated
+	}
+	if requireSuperAdmin && claims.Role != domain.RoleSuperAdmin {
+		return nil, httpx.StatusError(http.StatusForbidden, domain.ErrForbiddenSuperAdminOnly.Error())
+	}
+	return claims, nil
+}
+
+func mapDomainError(err error) error {
 	switch {
 	case errors.Is(err, domain.ErrValidation):
-		httpx.UnprocessableEntity(w, err.Error())
+		return httpx.StatusError(http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, domain.ErrEmailAlreadyExists):
-		httpx.Conflict(w, err.Error())
-	case errors.Is(err, domain.ErrInvalidCredentials), errors.Is(err, domain.ErrInvalidToken), errors.Is(err, domain.ErrRefreshTokenReuseDetected):
-		httpx.Unauthorized(w, err.Error())
-	case errors.Is(err, domain.ErrAccountNotApproved), errors.Is(err, domain.ErrForbiddenSuperAdminOnly):
-		httpx.Forbidden(w, err.Error())
+		return httpx.StatusError(http.StatusConflict, err.Error())
+	case errors.Is(err, domain.ErrInvalidCredentials),
+		errors.Is(err, domain.ErrInvalidToken),
+		errors.Is(err, domain.ErrRefreshTokenReuseDetected):
+		return httpx.StatusError(http.StatusUnauthorized, err.Error())
+	case errors.Is(err, domain.ErrAccountNotApproved),
+		errors.Is(err, domain.ErrForbiddenSuperAdminOnly):
+		return httpx.StatusError(http.StatusForbidden, err.Error())
 	case errors.Is(err, domain.ErrUserNotFound):
-		httpx.NotFound(w, err.Error())
+		return httpx.StatusError(http.StatusNotFound, err.Error())
 	default:
-		httpx.LogInternalError(w, "internal authentication error", err)
+		return httpx.StatusError(http.StatusInternalServerError, "internal authentication error")
 	}
 }

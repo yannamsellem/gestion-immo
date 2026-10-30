@@ -3,6 +3,7 @@ package accounting
 import (
 	"net/http"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/application"
@@ -72,6 +73,11 @@ func (m *Module) Service() *application.Service {
 // RegisterHTTPRoutes mounts all accounting REST HTTP routes onto mux.
 func (m *Module) RegisterHTTPRoutes(mux *http.ServeMux) {
 	m.handler.RegisterRoutes(mux)
+}
+
+// RegisterHumaRoutes mounts all accounting REST routes onto api.
+func (m *Module) RegisterHumaRoutes(api huma.API) {
+	m.handler.RegisterHumaRoutes(api)
 }
 
 // RegisterMCPTools registers all accounting MCP tools onto reg.

@@ -27,9 +27,11 @@
 	const ENTITY_TYPES: Array<{ value: EntityType; label: string }> = [
 		{ value: 'SCI_IS', label: 'SCI à l’IS' },
 		{ value: 'SCI_IR', label: 'SCI à l’IR' },
-		{ value: 'SARL_FAMILLE', label: 'SARL de famille' },
-		{ value: 'LMNP', label: 'LMNP' },
-		{ value: 'NOM_PROPRE', label: 'Détention en nom propre' }
+		{ value: 'SARL_IS', label: 'SARL à l’IS / Marchand de biens' },
+		{ value: 'FAMILY_SARL', label: 'SARL de famille' },
+		{ value: 'SAS', label: 'SAS' },
+		{ value: 'SOLE_PROPRIETORSHIP', label: 'Détention en nom propre' },
+		{ value: 'JOINT_OWNERSHIP', label: 'Indivision' }
 	];
 
 	let focusedEntityId = $state<string>('');

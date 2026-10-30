@@ -15,9 +15,9 @@ import (
 // CreateTenantCmd carries the input for creating a tenant.
 type CreateTenantCmd struct {
 	FullName string `json:"full_name"`
-	Email    string `json:"email"`
-	Phone    string `json:"phone"`
-	Address  string `json:"address"`
+	Email    string `json:"email,omitempty"`
+	Phone    string `json:"phone,omitempty"`
+	Address  string `json:"address,omitempty"`
 }
 
 // TenantDTO is an immutable projection of a domain.Tenant.
@@ -40,13 +40,13 @@ type CreateLeaseCmd struct {
 	TenantID             string            `json:"tenant_id"`
 	LeaseType            string            `json:"lease_type"`
 	RentNetCents         money.AmountCents `json:"rent_net_cents"`
-	ChargesCents         money.AmountCents `json:"charges_cents"`
-	SubjectToVAT         bool              `json:"subject_to_vat"`
-	VATRateBasisPoints   int64             `json:"vat_rate_basis_points"`
-	SecurityDepositCents money.AmountCents `json:"security_deposit_cents"`
-	DueDayOfMonth        int               `json:"due_day_of_month"`
-	GLIPolicyNumber      string            `json:"gli_policy_number"`
-	GuarantorName        string            `json:"guarantor_name"`
+	ChargesCents         money.AmountCents `json:"charges_cents,omitempty"`
+	SubjectToVAT         bool              `json:"subject_to_vat,omitempty"`
+	VATRateBasisPoints   int64             `json:"vat_rate_basis_points,omitempty"`
+	SecurityDepositCents money.AmountCents `json:"security_deposit_cents,omitempty"`
+	DueDayOfMonth        int               `json:"due_day_of_month,omitempty"`
+	GLIPolicyNumber      string            `json:"gli_policy_number,omitempty"`
+	GuarantorName        string            `json:"guarantor_name,omitempty"`
 	StartDate            string            `json:"start_date,omitempty"`
 	EndDate              string            `json:"end_date,omitempty"`
 }

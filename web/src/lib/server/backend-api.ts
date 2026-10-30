@@ -1,5 +1,7 @@
 import type { RequestEvent } from '@sveltejs/kit';
-import { FetchHttpClient, type HttpClient } from '#lib/core/api/http-client';
+import createClient from 'openapi-fetch';
+import { ApiError } from '#lib/core/api/api-error';
+import type { paths } from '#lib/core/api/openapi';
 import type {
 	AccountBalanceLineDTO,
 	AnnualAccountsReportDTO,
@@ -85,7 +87,7 @@ export interface BackendApi {
 	readonly lease: {
 		listTenants(includeArchived?: boolean): Promise<TenantDTO[]>;
 		createTenant(cmd: CreateTenantCmd): Promise<TenantDTO>;
-		archiveTenant(tenantId: string): Promise<TenantDTO>;
+		archiveTenant(tenantId: string): Promise<void>;
 		listLeases(entityId?: string): Promise<LeaseDTO[]>;
 		createLease(cmd: CreateLeaseCmd): Promise<LeaseDTO>;
 		generateRentCalls(entityId: string, periodMonth: string): Promise<RentCallDTO[]>;
@@ -156,357 +158,407 @@ export interface BackendApi {
 	};
 }
 
-function createDomainServices(http: HttpClient): BackendApi {
+type OpenApiClient = ReturnType<typeof createClient<paths>>;
+
+function extractErrorMessage(error: unknown, response: Response): string {
+	if (error && typeof error === 'object') {
+		const record = error as Record<string, unknown>;
+		if (typeof record.error === 'string' && record.error.trim().length > 0) {
+			return record.error;
+		}
+		if (typeof record.message === 'string' && record.message.trim().length > 0) {
+			return record.message;
+		}
+		if (typeof record.detail === 'string' && record.detail.trim().length > 0) {
+			return record.detail;
+		}
+	}
+	return response.statusText || `HTTP ${response.status}`;
+}
+
+async function unwrap<T>(
+	promise: Promise<{ data?: T; error?: unknown; response: Response }>
+): Promise<T> {
+	const { data, error, response } = await promise;
+	if (!response.ok || error !== undefined) {
+		throw new ApiError(response.status, extractErrorMessage(error, response));
+	}
+	return data as T;
+}
+
+async function unwrapVoid(
+	promise: Promise<{ data?: unknown; error?: unknown; response: Response }>
+): Promise<void> {
+	const { error, response } = await promise;
+	if (!response.ok || error !== undefined) {
+		throw new ApiError(response.status, extractErrorMessage(error, response));
+	}
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+	const bytes = new Uint8Array(buffer);
+	let binary = '';
+	for (let i = 0; i < bytes.byteLength; i++) {
+		binary += String.fromCharCode(bytes[i]);
+	}
+	return btoa(binary);
+}
+
+function createDomainServices(client: OpenApiClient): BackendApi {
 	return {
 		auth: {
 			signup(payload) {
-				return http.requestJson<UserDTO>('/api/v1/auth/signup', {
-					method: 'POST',
-					body: JSON.stringify(payload)
-				});
+				return unwrap(client.POST('/api/v1/auth/signup', { body: payload }));
 			},
 			login(payload) {
-				return http.requestJson<AuthTokensResponse>('/api/v1/auth/login', {
-					method: 'POST',
-					body: JSON.stringify(payload)
-				});
+				return unwrap(client.POST('/api/v1/auth/login', { body: payload }));
 			},
 			refresh(refreshToken) {
-				return http.requestJson<AuthTokensResponse>('/api/v1/auth/refresh', {
-					method: 'POST',
-					body: JSON.stringify({ refresh_token: refreshToken })
-				});
+				return unwrap(
+					client.POST('/api/v1/auth/refresh', {
+						body: { refresh_token: refreshToken }
+					})
+				);
 			},
-			logout(refreshToken) {
-				return http.requestJson<void>('/api/v1/auth/logout', {
-					method: 'POST',
-					body: JSON.stringify({ refresh_token: refreshToken })
-				});
+			async logout(refreshToken) {
+				await unwrap(
+					client.POST('/api/v1/auth/logout', {
+						body: { refresh_token: refreshToken }
+					})
+				);
 			},
 			createMcpToken(payload) {
-				return http.requestJson<MCPTokenResponse>('/api/v1/auth/mcp-tokens', {
-					method: 'POST',
-					body: JSON.stringify(payload)
-				});
+				return unwrap(client.POST('/api/v1/auth/mcp-tokens', { body: payload }));
 			},
 			listPendingUsers() {
-				return http.requestJson<UserDTO[]>('/api/v1/admin/users/pending');
+				return unwrap(client.GET('/api/v1/admin/users/pending'));
 			},
 			approveUser(userId) {
-				return http.requestJson<UserDTO>(
-					`/api/v1/admin/users/${encodeURIComponent(userId)}/approve`,
-					{ method: 'POST' }
+				return unwrap(
+					client.POST('/api/v1/admin/users/{id}/approve', {
+						params: { path: { id: userId } }
+					})
 				);
 			},
 			rejectUser(userId) {
-				return http.requestJson<UserDTO>(
-					`/api/v1/admin/users/${encodeURIComponent(userId)}/reject`,
-					{ method: 'POST' }
+				return unwrap(
+					client.POST('/api/v1/admin/users/{id}/reject', {
+						params: { path: { id: userId } }
+					})
 				);
 			}
 		},
 		portfolio: {
 			listEntities() {
-				return http.requestJson<LegalEntityDTO[]>('/api/v1/entities');
+				return unwrap(client.GET('/api/v1/entities'));
 			},
 			createEntity(cmd) {
-				return http.requestJson<LegalEntityDTO>('/api/v1/entities', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/entities', { body: cmd }));
 			},
 			getEntitySummary(entityId) {
-				return http.requestJson<EntityPortfolioSummaryDTO>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}`
+				return unwrap(
+					client.GET('/api/v1/entities/{id}', {
+						params: { path: { id: entityId } }
+					})
 				);
 			},
 			upsertShareholder(entityId, cmd) {
-				return http.requestJson<ShareholderDTO>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/shareholders`,
-					{
-						method: 'POST',
-						body: JSON.stringify({ ...cmd, legal_entity_id: entityId })
-					}
+				return unwrap(
+					client.POST('/api/v1/entities/{id}/shareholders', {
+						params: { path: { id: entityId } },
+						body: { ...cmd, legal_entity_id: entityId }
+					})
 				);
 			},
 			listProperties(entityId) {
-				return http.requestJson<PropertyDTO[]>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/properties`
+				return unwrap(
+					client.GET('/api/v1/entities/{id}/properties', {
+						params: { path: { id: entityId } }
+					})
 				);
 			},
 			createProperty(entityId, cmd) {
-				return http.requestJson<PropertyDTO>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/properties`,
-					{
-						method: 'POST',
-						body: JSON.stringify({ ...cmd, legal_entity_id: entityId })
-					}
+				return unwrap(
+					client.POST('/api/v1/entities/{id}/properties', {
+						params: { path: { id: entityId } },
+						body: { ...cmd, legal_entity_id: entityId }
+					})
 				);
 			},
 			createLot(propertyId, cmd) {
-				return http.requestJson<LotDTO>(
-					`/api/v1/properties/${encodeURIComponent(propertyId)}/lots`,
-					{
-						method: 'POST',
-						body: JSON.stringify({ ...cmd, property_id: propertyId })
-					}
+				return unwrap(
+					client.POST('/api/v1/properties/{id}/lots', {
+						params: { path: { id: propertyId } },
+						body: { ...cmd, property_id: propertyId }
+					})
 				);
 			}
 		},
 		lease: {
 			listTenants(includeArchived = false) {
-				const query = includeArchived ? '?include_archived=true' : '';
-				return http.requestJson<TenantDTO[]>(`/api/v1/tenants${query}`);
+				return unwrap(
+					client.GET('/api/v1/tenants', {
+						params: {
+							query: includeArchived ? { include_archived: 'true' } : undefined
+						}
+					})
+				);
 			},
 			createTenant(cmd) {
-				return http.requestJson<TenantDTO>('/api/v1/tenants', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/tenants', { body: cmd }));
 			},
 			archiveTenant(tenantId) {
-				return http.requestJson<TenantDTO>(
-					`/api/v1/tenants/${encodeURIComponent(tenantId)}/archive`,
-					{ method: 'POST' }
+				return unwrapVoid(
+					client.POST('/api/v1/tenants/{id}/archive', {
+						params: { path: { id: tenantId } }
+					})
 				);
 			},
 			listLeases(entityId) {
-				const query =
-					entityId && entityId !== 'ALL' ? `?entity_id=${encodeURIComponent(entityId)}` : '';
-				return http.requestJson<LeaseDTO[]>(`/api/v1/leases${query}`);
+				return unwrap(
+					client.GET('/api/v1/leases', {
+						params: {
+							query: entityId && entityId !== 'ALL' ? { entity_id: entityId } : undefined
+						}
+					})
+				);
 			},
 			createLease(cmd) {
-				return http.requestJson<LeaseDTO>('/api/v1/leases', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/leases', { body: cmd }));
 			},
 			generateRentCalls(entityId, periodMonth) {
-				return http.requestJson<RentCallDTO[]>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/rent-calls/generate`,
-					{
-						method: 'POST',
-						body: JSON.stringify({ period_month: periodMonth })
-					}
+				return unwrap(
+					client.POST('/api/v1/entities/{id}/rent-calls/generate', {
+						params: { path: { id: entityId } },
+						body: { period_month: periodMonth }
+					})
 				);
 			},
 			listEntityRentCalls(entityId, periodMonth) {
-				const query = periodMonth ? `?period_month=${encodeURIComponent(periodMonth)}` : '';
-				return http.requestJson<RentCallDTO[]>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/rent-calls${query}`
+				return unwrap(
+					client.GET('/api/v1/entities/{id}/rent-calls', {
+						params: {
+							path: { id: entityId },
+							query: periodMonth ? { period_month: periodMonth } : undefined
+						}
+					})
 				);
 			}
 		},
 		payment: {
 			recordCashPayment(cmd) {
-				return http.requestJson<PaymentReceiptDTO>('/api/v1/payments/cash', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/payments/cash', { body: cmd }));
 			},
 			recordBankPayment(cmd) {
-				return http.requestJson<PaymentReceiptDTO>('/api/v1/payments/bank', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/payments/bank', { body: cmd }));
 			},
 			recordCashDeposit(cmd) {
-				return http.requestJson<CashJournalEntryDTO>('/api/v1/payments/cash-deposit', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/payments/cash-deposit', { body: cmd }));
 			},
 			importPaymentsCsv(entityId, csvContent) {
-				return http.requestJson<BatchImportResultDTO>('/api/v1/payments/import-csv', {
-					method: 'POST',
-					body: JSON.stringify({
-						entity_id: entityId,
-						csv_content: csvContent
+				return unwrap(
+					client.POST('/api/v1/payments/import-csv', {
+						body: {
+							entity_id: entityId,
+							csv_content: csvContent
+						}
 					})
-				});
+				);
 			},
 			listNegativePositions(entityId) {
-				return http.requestJson<NegativePositionDTO[]>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/negative-positions`
+				return unwrap(
+					client.GET('/api/v1/entities/{id}/negative-positions', {
+						params: { path: { id: entityId } }
+					})
 				);
 			},
 			listCashJournal(entityId) {
-				return http.requestJson<CashJournalEntryDTO[]>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/cash-journal`
+				return unwrap(
+					client.GET('/api/v1/entities/{id}/cash-journal', {
+						params: { path: { id: entityId } }
+					})
 				);
 			}
 		},
 		document: {
 			listTemplates() {
-				return http.requestJson<DocumentTemplateDTO[]>('/api/v1/document-templates');
+				return unwrap(client.GET('/api/v1/document-templates'));
 			},
 			registerTemplate(cmd) {
-				return http.requestJson<DocumentTemplateDTO>('/api/v1/document-templates', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/document-templates', { body: cmd }));
 			},
 			generateFromTemplate(cmd) {
-				return http.requestJson<StoredFileDTO>('/api/v1/documents/generate', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/documents/generate', { body: cmd }));
 			},
-			uploadFile(params) {
-				const formData = new FormData();
-				if (params.legalEntityId) {
-					formData.set('legal_entity_id', params.legalEntityId);
-				}
-				if (params.leaseId) {
-					formData.set('lease_id', params.leaseId);
-				}
-				formData.set('category', params.category);
-				formData.set('file', params.file);
-				return http.requestMultipart<StoredFileDTO>('/api/v1/documents/upload', formData);
+			async uploadFile(params) {
+				const buffer = await params.file.arrayBuffer();
+				return unwrap(
+					client.POST('/api/v1/documents/upload', {
+						body: {
+							legal_entity_id: params.legalEntityId,
+							lease_id: params.leaseId,
+							category: params.category,
+							file_name: params.file.name,
+							content_type: params.file.type || 'application/octet-stream',
+							content_base64: arrayBufferToBase64(buffer)
+						}
+					})
+				);
 			},
 			assembleGliDossier(leaseId, templateId) {
-				return http.requestJson<GLIDossierArchiveDTO>(
-					`/api/v1/leases/${encodeURIComponent(leaseId)}/gli-dossier`,
-					{
-						method: 'POST',
-						body: JSON.stringify({ template_id: templateId ?? '' })
-					}
+				return unwrap(
+					client.POST('/api/v1/leases/{id}/gli-dossier', {
+						params: { path: { id: leaseId } },
+						body: { template_id: templateId ?? '' }
+					})
 				);
 			},
 			listLeaseDocuments(leaseId) {
-				return http.requestJson<StoredFileDTO[]>(
-					`/api/v1/leases/${encodeURIComponent(leaseId)}/documents`
+				return unwrap(
+					client.GET('/api/v1/leases/{id}/documents', {
+						params: { path: { id: leaseId } }
+					})
 				);
 			}
 		},
 		inspection: {
 			listTemplates() {
-				return http.requestJson<InspectionTemplateDTO[]>('/api/v1/inspection-templates');
+				return unwrap(client.GET('/api/v1/inspection-templates'));
 			},
 			createTemplate(cmd) {
-				return http.requestJson<InspectionTemplateDTO>('/api/v1/inspection-templates', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/inspection-templates', { body: cmd }));
 			},
 			getTemplate(templateId) {
-				return http.requestJson<InspectionTemplateDTO>(
-					`/api/v1/inspection-templates/${encodeURIComponent(templateId)}`
+				return unwrap(
+					client.GET('/api/v1/inspection-templates/{id}', {
+						params: { path: { id: templateId } }
+					})
 				);
 			},
 			listInspections(leaseId) {
-				return http.requestJson<InspectionDTO[]>(
-					`/api/v1/inspections?lease_id=${encodeURIComponent(leaseId)}`
+				return unwrap(
+					client.GET('/api/v1/inspections', {
+						params: { query: { lease_id: leaseId } }
+					})
 				);
 			},
 			createInspection(cmd) {
-				return http.requestJson<InspectionDTO>('/api/v1/inspections', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/inspections', { body: cmd }));
 			},
 			getInspection(inspectionId) {
-				return http.requestJson<InspectionDTO>(
-					`/api/v1/inspections/${encodeURIComponent(inspectionId)}`
+				return unwrap(
+					client.GET('/api/v1/inspections/{id}', {
+						params: { path: { id: inspectionId } }
+					})
 				);
 			},
 			upsertInspectionItems(inspectionId, items) {
-				return http.requestJson<InspectionDTO>(
-					`/api/v1/inspections/${encodeURIComponent(inspectionId)}/items`,
-					{
-						method: 'PUT',
-						body: JSON.stringify({ items })
-					}
+				return unwrap(
+					client.PUT('/api/v1/inspections/{id}/items', {
+						params: { path: { id: inspectionId } },
+						body: { items }
+					})
 				);
 			},
 			generateInspectionPdf(inspectionId) {
-				return http.requestJson<InspectionReportDTO>(
-					`/api/v1/inspections/${encodeURIComponent(inspectionId)}/pdf`,
-					{ method: 'POST' }
+				return unwrap(
+					client.POST('/api/v1/inspections/{id}/pdf', {
+						params: { path: { id: inspectionId } }
+					})
 				);
 			},
 			listIncidents(filters) {
-				const params = new URLSearchParams();
-				if (filters?.propertyId) params.set('property_id', filters.propertyId);
-				if (filters?.lotId) params.set('lot_id', filters.lotId);
-				if (filters?.leaseId) params.set('lease_id', filters.leaseId);
-				if (filters?.status) params.set('status', filters.status);
-				const query = params.toString();
-				return http.requestJson<IncidentDTO[]>(`/api/v1/incidents${query ? `?${query}` : ''}`);
+				return unwrap(
+					client.GET('/api/v1/incidents', {
+						params: {
+							query: {
+								property_id: filters?.propertyId,
+								lease_id: filters?.leaseId
+							}
+						}
+					})
+				);
 			},
 			createIncident(cmd) {
-				return http.requestJson<IncidentDTO>('/api/v1/incidents', {
-					method: 'POST',
-					body: JSON.stringify(cmd)
-				});
+				return unwrap(client.POST('/api/v1/incidents', { body: cmd }));
 			},
 			getIncident(incidentId) {
-				return http.requestJson<IncidentDTO>(`/api/v1/incidents/${encodeURIComponent(incidentId)}`);
+				return unwrap(
+					client.GET('/api/v1/incidents/{id}', {
+						params: { path: { id: incidentId } }
+					})
+				);
 			},
 			updateIncident(incidentId, cmd) {
-				return http.requestJson<IncidentDTO>(
-					`/api/v1/incidents/${encodeURIComponent(incidentId)}`,
-					{
-						method: 'PATCH',
-						body: JSON.stringify(cmd)
-					}
+				return unwrap(
+					client.PATCH('/api/v1/incidents/{id}', {
+						params: { path: { id: incidentId } },
+						body: cmd
+					})
 				);
 			}
 		},
 		accounting: {
 			listJournalEntries(entityId, fiscalYear) {
-				return http.requestJson<JournalEntryDTO[]>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/journal-entries?fiscal_year=${fiscalYear}`
+				return unwrap(
+					client.GET('/api/v1/entities/{id}/journal-entries', {
+						params: {
+							path: { id: entityId },
+							query: { fiscal_year: String(fiscalYear) }
+						}
+					})
 				);
 			},
 			recordJournalEntry(entityId, cmd) {
-				return http.requestJson<JournalEntryDTO>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/journal-entries`,
-					{
-						method: 'POST',
-						body: JSON.stringify({ ...cmd, legal_entity_id: entityId })
-					}
+				return unwrap(
+					client.POST('/api/v1/entities/{id}/journal-entries', {
+						params: { path: { id: entityId } },
+						body: { ...cmd, legal_entity_id: entityId }
+					})
 				);
 			},
 			upsertBalanceLines(entityId, fiscalYear, lines) {
-				return http.requestJson<void>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/statements/lines`,
-					{
-						method: 'PUT',
-						body: JSON.stringify({
+				return unwrapVoid(
+					client.PUT('/api/v1/entities/{id}/statements/lines', {
+						params: { path: { id: entityId } },
+						body: {
 							fiscal_year: fiscalYear,
 							lines
-						})
-					}
+						}
+					})
 				);
 			},
 			previewStatements(entityId, fiscalYear, disabledLineIds) {
-				return http.requestJson<ComputedFinancialStatementsDTO>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/statements/preview`,
-					{
-						method: 'POST',
-						body: JSON.stringify({
+				return unwrap(
+					client.POST('/api/v1/entities/{id}/statements/preview', {
+						params: { path: { id: entityId } },
+						body: {
 							fiscal_year: fiscalYear,
 							disabled_line_ids: disabledLineIds
-						})
-					}
+						}
+					})
 				);
 			},
 			generateAnnualAccountsPdf(entityId, fiscalYear, disabledLineIds) {
-				return http.requestJson<AnnualAccountsReportDTO>(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/statements/pdf`,
-					{
-						method: 'POST',
-						body: JSON.stringify({
+				return unwrap(
+					client.POST('/api/v1/entities/{id}/statements/pdf', {
+						params: { path: { id: entityId } },
+						body: {
 							fiscal_year: fiscalYear,
 							disabled_line_ids: disabledLineIds
-						})
-					}
+						}
+					})
 				);
 			},
 			exportFecTsv(entityId, fiscalYear) {
-				return http.requestText(
-					`/api/v1/entities/${encodeURIComponent(entityId)}/fec?fiscal_year=${fiscalYear}`
+				return unwrap(
+					client.GET('/api/v1/entities/{id}/fec', {
+						params: {
+							path: { id: entityId },
+							query: { fiscal_year: String(fiscalYear) }
+						},
+						parseAs: 'text'
+					})
 				);
 			}
 		}
@@ -536,16 +588,16 @@ export function createBackendApi(event: RequestEvent): BackendApi {
 	let currentAccessToken = initialSession.accessToken;
 	let currentRefreshToken = initialSession.refreshToken;
 	const isSecure = event.url.protocol === 'https:';
+	let refreshInFlight: Promise<string | null> | null = null;
 
-	const http = new FetchHttpClient({
-		baseUrl,
-		fetchFn: event.fetch,
-		defaultHeaders,
-		getAccessToken: () => currentAccessToken,
-		refreshSession: async () => {
-			if (!currentRefreshToken) {
-				return null;
-			}
+	const refreshSession = async (): Promise<string | null> => {
+		if (!currentRefreshToken) {
+			return null;
+		}
+		if (refreshInFlight) {
+			return refreshInFlight;
+		}
+		refreshInFlight = (async () => {
 			try {
 				const refreshUrl = `${baseUrl.replace(/\/$/, '')}/api/v1/auth/refresh`;
 				const response = await event.fetch(refreshUrl, {
@@ -568,15 +620,70 @@ export function createBackendApi(event: RequestEvent): BackendApi {
 				return currentAccessToken;
 			} catch {
 				return null;
+			} finally {
+				refreshInFlight = null;
 			}
+		})();
+		return refreshInFlight;
+	};
+
+	const clearSession = () => {
+		currentAccessToken = null;
+		currentRefreshToken = null;
+		event.locals.user = null;
+		clearSessionCookies(event.cookies);
+	};
+
+	const requestClones = new WeakMap<Request, Request>();
+
+	const client = createClient<paths>({
+		baseUrl: baseUrl.replace(/\/$/, ''),
+		fetch: event.fetch
+	});
+
+	client.use({
+		async onRequest({ request }) {
+			for (const [key, value] of Object.entries(defaultHeaders)) {
+				if (!request.headers.has(key)) {
+					request.headers.set(key, value);
+				}
+			}
+			const isPublicAuthRoute =
+				request.url.endsWith('/api/v1/auth/login') ||
+				request.url.endsWith('/api/v1/auth/signup') ||
+				request.url.endsWith('/api/v1/auth/refresh');
+			if (!isPublicAuthRoute && currentAccessToken && !request.headers.has('Authorization')) {
+				request.headers.set('Authorization', `Bearer ${currentAccessToken}`);
+			}
+			requestClones.set(request, request.clone() as unknown as Request);
+			return request;
 		},
-		onUnauthorized: () => {
-			currentAccessToken = null;
-			currentRefreshToken = null;
-			event.locals.user = null;
-			clearSessionCookies(event.cookies);
+		async onResponse({ request, response }) {
+			const isPublicAuthRoute =
+				request.url.endsWith('/api/v1/auth/login') ||
+				request.url.endsWith('/api/v1/auth/signup') ||
+				request.url.endsWith('/api/v1/auth/refresh');
+			if (response.status !== 401 || isPublicAuthRoute) {
+				return response;
+			}
+
+			const newToken = await refreshSession();
+			if (!newToken) {
+				clearSession();
+				return response;
+			}
+
+			const retrySource = requestClones.get(request) ?? request;
+			const retryHeaders = new Headers(retrySource.headers);
+			retryHeaders.set('Authorization', `Bearer ${newToken}`);
+			const retryRequest = new Request(retrySource, { headers: retryHeaders });
+			const retryResponse = await event.fetch(retryRequest);
+			if (retryResponse.status === 401) {
+				clearSession();
+			}
+			return retryResponse;
 		}
 	});
 
-	return createDomainServices(http);
+	return createDomainServices(client);
 }

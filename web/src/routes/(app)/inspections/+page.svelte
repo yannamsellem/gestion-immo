@@ -41,8 +41,8 @@
 
 	const INCIDENT_STATUS_OPTIONS: Array<{ value: IncidentStatus; label: string }> = [
 		{ value: 'OPEN', label: 'Ouvert' },
-		{ value: 'IN_PROGRESS', label: 'En cours' },
-		{ value: 'RESOLVED', label: 'Résolu' },
+		{ value: 'INSURANCE_CLAIM', label: 'Déclaration assurance' },
+		{ value: 'WORK_IN_PROGRESS', label: 'Travaux en cours' },
 		{ value: 'CLOSED', label: 'Clôturé' }
 	];
 
@@ -193,8 +193,8 @@
 		status: IncidentStatus
 	): 'destructive' | 'default' | 'secondary' | 'outline' {
 		if (status === 'OPEN') return 'destructive';
-		if (status === 'IN_PROGRESS') return 'default';
-		if (status === 'RESOLVED') return 'secondary';
+		if (status === 'INSURANCE_CLAIM') return 'default';
+		if (status === 'WORK_IN_PROGRESS') return 'secondary';
 		return 'outline';
 	}
 

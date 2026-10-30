@@ -15,11 +15,11 @@ import (
 type CreateLegalEntityCmd struct {
 	Name              string            `json:"name"`
 	EntityType        string            `json:"entity_type"`
-	SIRET             string            `json:"siret"`
-	NAFCode           string            `json:"naf_code"`
-	Address           string            `json:"address"`
-	ShareCapitalCents money.AmountCents `json:"share_capital_cents"`
-	TotalShares       int64             `json:"total_shares"`
+	SIRET             string            `json:"siret,omitempty"`
+	NAFCode           string            `json:"naf_code,omitempty"`
+	Address           string            `json:"address,omitempty"`
+	ShareCapitalCents money.AmountCents `json:"share_capital_cents,omitempty"`
+	TotalShares       int64             `json:"total_shares,omitempty"`
 }
 
 // LegalEntityDTO is an immutable projection of a domain.LegalEntity.
@@ -38,11 +38,11 @@ type LegalEntityDTO struct {
 
 // UpsertShareholderCmd carries the input for creating or updating an associate (CERFA 2059-F).
 type UpsertShareholderCmd struct {
-	LegalEntityID         string            `json:"legal_entity_id"`
+	LegalEntityID         string            `json:"legal_entity_id,omitempty"`
 	FullName              string            `json:"full_name"`
 	SharesCount           int64             `json:"shares_count"`
-	CurrentAccountCents   money.AmountCents `json:"current_account_cents"`
-	RemunerationPaidCents money.AmountCents `json:"remuneration_paid_cents"`
+	CurrentAccountCents   money.AmountCents `json:"current_account_cents,omitempty"`
+	RemunerationPaidCents money.AmountCents `json:"remuneration_paid_cents,omitempty"`
 }
 
 // ShareholderDTO is an immutable projection of a domain.Shareholder.
@@ -60,13 +60,13 @@ type ShareholderDTO struct {
 
 // CreatePropertyCmd carries the input for adding a property asset to a legal entity.
 type CreatePropertyCmd struct {
-	LegalEntityID      string            `json:"legal_entity_id"`
+	LegalEntityID      string            `json:"legal_entity_id,omitempty"`
 	Label              string            `json:"label"`
-	PropertyType       string            `json:"property_type"`
-	AccountingCategory string            `json:"accounting_category"`
-	Address            string            `json:"address"`
-	AcquisitionCents   money.AmountCents `json:"acquisition_cents"`
-	WorkStockCents     money.AmountCents `json:"work_stock_cents"`
+	PropertyType       string            `json:"property_type,omitempty"`
+	AccountingCategory string            `json:"accounting_category,omitempty"`
+	Address            string            `json:"address,omitempty"`
+	AcquisitionCents   money.AmountCents `json:"acquisition_cents,omitempty"`
+	WorkStockCents     money.AmountCents `json:"work_stock_cents,omitempty"`
 }
 
 // PropertyDTO is an immutable projection of a domain.Property with its lots.
@@ -87,12 +87,12 @@ type PropertyDTO struct {
 
 // CreateLotCmd carries the input for adding a rentable lot to a property.
 type CreateLotCmd struct {
-	PropertyID     string `json:"property_id"`
+	PropertyID     string `json:"property_id,omitempty"`
 	Label          string `json:"label"`
-	LotType        string `json:"lot_type"`
-	SurfaceM2      int64  `json:"surface_m2"`
-	OwnershipShare int64  `json:"ownership_share"`
-	Floor          string `json:"floor"`
+	LotType        string `json:"lot_type,omitempty"`
+	SurfaceM2      int64  `json:"surface_m2,omitempty"`
+	OwnershipShare int64  `json:"ownership_share,omitempty"`
+	Floor          string `json:"floor,omitempty"`
 }
 
 // LotDTO is an immutable projection of a domain.Lot.

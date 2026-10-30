@@ -11,7 +11,7 @@ KEYS_DIR       := $(CURDIR)/keys
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build dev test test-race lint migrate-up migrate-down migrate-status migrate-create generate-keys bootstrap token docker-up docker-down
+.PHONY: help build dev test test-race lint openapi migrate-up migrate-down migrate-status migrate-create generate-keys bootstrap token docker-up docker-down
 
 # ------------------------------------------------------------------------------
 # General & Help
@@ -39,6 +39,9 @@ test-race: ## Run all Go tests with the race detector enabled
 
 lint: ## Run go vet static analysis across all packages
 	go vet ./...
+
+openapi: ## Export the OpenAPI 3.1 JSON specification to web/src/lib/core/api/openapi.json
+	go run ./cmd server --export-openapi $(CURDIR)/../web/src/lib/core/api/openapi.json
 
 # ------------------------------------------------------------------------------
 # Database Migrations (jackc/tern)

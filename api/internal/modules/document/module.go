@@ -3,6 +3,7 @@ package document
 import (
 	"net/http"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/document/application"
@@ -78,6 +79,11 @@ func (m *Module) Service() *application.Service {
 // RegisterHTTPRoutes mounts all document REST HTTP routes onto mux.
 func (m *Module) RegisterHTTPRoutes(mux *http.ServeMux) {
 	m.handler.RegisterRoutes(mux)
+}
+
+// RegisterHumaRoutes mounts all document REST routes onto api.
+func (m *Module) RegisterHumaRoutes(api huma.API) {
+	m.handler.RegisterHumaRoutes(api)
 }
 
 // RegisterMCPTools registers all document MCP tools onto reg.

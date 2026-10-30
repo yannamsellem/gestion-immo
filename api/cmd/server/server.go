@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -42,12 +44,20 @@ func Command() *cli.Command {
 				Value:   "8080",
 				Sources: cli.EnvVars("PORT"),
 			},
+			&cli.StringFlag{
+				Name:  "export-openapi",
+				Usage: "Write the OpenAPI 3.1 JSON specification to the given file path and exit without starting the server",
+			},
 		},
 		Action: run,
 	}
 }
 
 func run(ctx context.Context, cmd *cli.Command) error {
+	if exportPath := strings.TrimSpace(cmd.String("export-openapi")); exportPath != "" {
+		return exportOpenAPISpec(exportPath)
+	}
+
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -69,6 +79,52 @@ func run(ctx context.Context, cmd *cli.Command) error {
 
 	port := strings.TrimSpace(cmd.String("port"))
 	return serveHTTP(ctx, ":"+port, handler)
+}
+
+func exportOpenAPISpec(outPath string) error {
+	r2Storage := r2.NewInMemoryStorage()
+	pdfEngine := templating.NewInMemoryPdfEngine()
+
+	authMod, err := auth.NewModule(nil, "", "")
+	if err != nil {
+		return err
+	}
+	portfolioMod := portfolio.NewModule(nil)
+	leaseMod := lease.NewModule(nil)
+	paymentMod := payment.NewModule(nil, leaseMod.Service(), false)
+	documentMod := document.NewModule(
+		nil,
+		r2Storage,
+		pdfEngine,
+		portfolioMod.Service(),
+		leaseMod.Service(),
+		paymentMod.Service(),
+	)
+	inspectionMod := inspection.NewModule(nil, r2Storage, pdfEngine)
+	accountingMod := accounting.NewModule(nil, r2Storage, pdfEngine, portfolioMod.Service())
+
+	mux := http.NewServeMux()
+	api := httpx.NewHumaAPI(mux)
+	authMod.RegisterHumaRoutes(api)
+	portfolioMod.RegisterHumaRoutes(api)
+	leaseMod.RegisterHumaRoutes(api)
+	paymentMod.RegisterHumaRoutes(api)
+	documentMod.RegisterHumaRoutes(api)
+	inspectionMod.RegisterHumaRoutes(api)
+	accountingMod.RegisterHumaRoutes(api)
+
+	raw, err := json.MarshalIndent(api.OpenAPI(), "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+
+	if dir := filepath.Dir(outPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(outPath, raw, 0o644)
 }
 
 // BuildHTTPHandler constructs the root HTTP and MCP handler with JWT authentication enforced on all business routes.
@@ -116,12 +172,13 @@ func BuildHTTPHandler(pool *pgxpool.Pool, cfg config.Config) (http.Handler, erro
 	authMod.RegisterHTTPRoutes(mux)
 
 	protectedMux := http.NewServeMux()
-	portfolioMod.RegisterHTTPRoutes(protectedMux)
-	leaseMod.RegisterHTTPRoutes(protectedMux)
-	paymentMod.RegisterHTTPRoutes(protectedMux)
-	documentMod.RegisterHTTPRoutes(protectedMux)
-	inspectionMod.RegisterHTTPRoutes(protectedMux)
-	accountingMod.RegisterHTTPRoutes(protectedMux)
+	protectedAPI := httpx.NewHumaAPI(protectedMux)
+	portfolioMod.RegisterHumaRoutes(protectedAPI)
+	leaseMod.RegisterHumaRoutes(protectedAPI)
+	paymentMod.RegisterHumaRoutes(protectedAPI)
+	documentMod.RegisterHumaRoutes(protectedAPI)
+	inspectionMod.RegisterHumaRoutes(protectedAPI)
+	accountingMod.RegisterHumaRoutes(protectedAPI)
 	mux.Handle("/api/v1/", authMod.RequireAuthMiddleware()(protectedMux))
 
 	mux.Handle("POST /mcp", mcpRegistry)

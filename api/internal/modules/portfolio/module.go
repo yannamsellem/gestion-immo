@@ -3,6 +3,7 @@ package portfolio
 import (
 	"net/http"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/application"
@@ -59,6 +60,11 @@ func (m *Module) Service() *application.Service {
 // RegisterHTTPRoutes mounts all portfolio REST HTTP routes onto mux.
 func (m *Module) RegisterHTTPRoutes(mux *http.ServeMux) {
 	m.handler.RegisterRoutes(mux)
+}
+
+// RegisterHumaRoutes mounts all portfolio REST routes onto api.
+func (m *Module) RegisterHumaRoutes(api huma.API) {
+	m.handler.RegisterHumaRoutes(api)
 }
 
 // RegisterMCPTools registers all portfolio MCP tools onto reg.

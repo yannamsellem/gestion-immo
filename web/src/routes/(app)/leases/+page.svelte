@@ -36,18 +36,20 @@
 	let { data, form }: PageProps = $props();
 
 	const LEASE_TYPES: Array<{ value: LeaseType; label: string }> = [
-		{ value: 'RESIDENTIAL_EMPTY', label: 'Habitation vide (Loi 89 — 3 ans)' },
+		{ value: 'RESIDENTIAL_UNFURNISHED', label: 'Habitation vide (Loi 89 — 3 ans)' },
 		{ value: 'RESIDENTIAL_FURNISHED', label: 'Habitation meublée (1 an / 9 mois)' },
-		{ value: 'MOBILITY', label: 'Bail mobilité (1 à 10 mois)' },
-		{ value: 'COMMERCIAL_3_6_9', label: 'Bail commercial 3 / 6 / 9' }
+		{ value: 'COMMERCIAL_3_6_9', label: 'Bail commercial 3 / 6 / 9' },
+		{ value: 'PROFESSIONAL', label: 'Bail professionnel' },
+		{ value: 'SHORT_TERM', label: 'Bail mobilité / courte durée' },
+		{ value: 'PARKING', label: 'Bail parking / garage' }
 	];
 
 	const TEMPLATE_TYPES: Array<{ value: TemplateType; label: string }> = [
-		{ value: 'LEASE_CONTRACT', label: 'Contrat de bail' },
-		{ value: 'RENT_CALL', label: 'Avis d’échéance' },
-		{ value: 'RECEIPT', label: 'Quittance de loyer' },
-		{ value: 'REMINDER', label: 'Lettre de relance impayé' },
-		{ value: 'GLI_NOTICE', label: 'Mise en demeure / Déclaration GLI' }
+		{ value: 'LEASE', label: 'Contrat de bail' },
+		{ value: 'RENT_RECEIPT', label: 'Quittance / Avis d’échéance' },
+		{ value: 'FORMAL_NOTICE', label: 'Lettre de relance / Mise en demeure' },
+		{ value: 'GLI_DECLARATION', label: 'Déclaration sinistre GLI' },
+		{ value: 'CUSTOM', label: 'Modèle personnalisé' }
 	];
 
 	let activeTab = $state<'leases' | 'tenants' | 'templates'>('leases');
@@ -57,7 +59,7 @@
 	let leaseEntityId = $state('');
 	let leaseLotId = $state('');
 	let leaseTenantId = $state('');
-	let leaseType = $state<LeaseType>('RESIDENTIAL_EMPTY');
+	let leaseType = $state<LeaseType>('RESIDENTIAL_UNFURNISHED');
 	let leaseRentNetEuro = $state('800,00');
 	let leaseChargesEuro = $state('75,00');
 	let leaseSubjectToVat = $state(false);
@@ -89,7 +91,7 @@
 	// Register Template Dialog
 	let registerTemplateOpen = $state(false);
 	let tplName = $state('');
-	let tplType = $state<TemplateType>('LEASE_CONTRACT');
+	let tplType = $state<TemplateType>('LEASE');
 	let tplFormat = $state<TemplateFormat>('HTML');
 	let tplHtmlBody = $state(
 		'<h1>{{entity_name}}</h1><p>Locataire : {{tenant_name}}</p><p>Lot : {{property_label}}</p>'

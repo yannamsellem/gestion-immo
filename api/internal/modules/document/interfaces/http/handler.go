@@ -1,11 +1,19 @@
 package http
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"reflect"
 	"strings"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/document/application"
 	"github.com/yannamsellem/gestion-immo/internal/modules/document/domain"
@@ -24,134 +32,274 @@ func NewHandler(svc *application.Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// RegisterRoutes mounts all document and GLI dossier REST endpoints on the Go 1.22+ ServeMux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/document-templates", h.handleRegisterTemplate)
-	mux.HandleFunc("GET /api/v1/document-templates", h.handleListTemplates)
-	mux.HandleFunc("POST /api/v1/documents/generate", h.handleGenerateFromTemplate)
-	mux.HandleFunc("POST /api/v1/documents/upload", h.handleAttachFile)
-	mux.HandleFunc("POST /api/v1/leases/{id}/gli-dossier", h.handleAssembleGLIDossier)
-	mux.HandleFunc("POST /api/v1/documents/gli-dossier", h.handleAssembleGLIDossierBody)
-	mux.HandleFunc("GET /api/v1/leases/{id}/documents", h.handleListLeaseDocuments)
+// RegisterTemplateBody represents the request body for registering a document template.
+type RegisterTemplateBody struct {
+	Name         string `json:"name"`
+	TemplateType string `json:"template_type"`
+	Format       string `json:"format"`
+	DocxBase64   string `json:"docx_base64,omitempty"`
+	HTMLBody     string `json:"html_body,omitempty"`
 }
 
-func (h *Handler) handleRegisterTemplate(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name          string `json:"name"`
-		TemplateType  string `json:"template_type"`
-		Format        string `json:"format"`
-		DocxBase64    string `json:"docx_base64,omitempty"`
-		HTMLBody      string `json:"html_body,omitempty"`
-	}
-	if r.Body != nil {
-		r.Body = http.MaxBytesReader(w, r.Body, httpx.MaxUploadBodyBytes)
-	}
-	if err := httpx.DecodeJSONWithLimit(r, &req, httpx.MaxUploadBodyBytes); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
+type registerTemplateInput struct {
+	Body RegisterTemplateBody
+}
+
+type documentTemplateOutput struct {
+	Body application.DocumentTemplateDTO
+}
+
+type documentTemplateListOutput struct {
+	Body []application.DocumentTemplateDTO
+}
+
+type generateFromTemplateInput struct {
+	Body application.GenerateDocCmd
+}
+
+type storedFileOutput struct {
+	Body application.StoredFileDTO
+}
+
+type storedFileListOutput struct {
+	Body []application.StoredFileDTO
+}
+
+// UploadDocumentBody represents the JSON request body for uploading a base64-encoded document to R2.
+type UploadDocumentBody struct {
+	LegalEntityID string `json:"legal_entity_id,omitempty"`
+	LeaseID       string `json:"lease_id,omitempty"`
+	Category      string `json:"category"`
+	FileName      string `json:"file_name"`
+	ContentType   string `json:"content_type"`
+	ContentBase64 string `json:"content_base64"`
+}
+
+type attachFileInput struct {
+	ContentType string `header:"Content-Type"`
+	RawBody     []byte
+}
+
+// AssembleGLIDossierByLeaseBody represents the optional body for assembling a GLI dossier by lease ID.
+type AssembleGLIDossierByLeaseBody struct {
+	TemplateID string `json:"template_id,omitempty"`
+}
+
+type assembleGLIDossierByLeaseInput struct {
+	ID         string `path:"id"`
+	TemplateID string `query:"template_id" required:"false"`
+	RawBody    []byte
+}
+
+// AssembleGLIDossierBody represents the request body for assembling a GLI claim dossier.
+type AssembleGLIDossierBody struct {
+	LeaseID    string `json:"lease_id"`
+	TemplateID string `json:"template_id,omitempty"`
+}
+
+type assembleGLIDossierBodyInput struct {
+	Body AssembleGLIDossierBody
+}
+
+type gliDossierOutput struct {
+	Body application.GLIDossierArchiveDTO
+}
+
+type leaseIDInput struct {
+	ID string `path:"id"`
+}
+
+// RegisterRoutes mounts all document and GLI dossier REST endpoints on the Go 1.22+ ServeMux.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	h.RegisterHumaRoutes(httpx.NewHumaAPI(mux))
+}
+
+// RegisterHumaRoutes registers all document and GLI dossier REST endpoints onto a Huma API.
+func (h *Handler) RegisterHumaRoutes(api huma.API) {
+	bearerSecurity := []map[string][]string{{"bearerAuth": {}}}
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "registerDocumentTemplate",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/document-templates",
+		Summary:       "Register a customizable .docx or HTML document template",
+		DefaultStatus: http.StatusCreated,
+		MaxBodyBytes:  httpx.MaxUploadBodyBytes,
+		Security:      bearerSecurity,
+		Tags:          []string{"Document"},
+	}, h.handleRegisterTemplate)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "listDocumentTemplates",
+		Method:        http.MethodGet,
+		Path:          "/api/v1/document-templates",
+		Summary:       "List registered document templates",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Document"},
+	}, h.handleListTemplates)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "generateDocument",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/documents/generate",
+		Summary:       "Generate a document (.docx or PDF) from a template",
+		DefaultStatus: http.StatusCreated,
+		Security:      bearerSecurity,
+		Tags:          []string{"Document"},
+	}, h.handleGenerateFromTemplate)
+
+	uploadSchema := huma.SchemaFromType(api.OpenAPI().Components.Schemas, reflect.TypeFor[UploadDocumentBody]())
+	huma.Register(api, huma.Operation{
+		OperationID:      "uploadDocument",
+		Method:           http.MethodPost,
+		Path:             "/api/v1/documents/upload",
+		Summary:          "Upload and attach a file to Cloudflare R2",
+		DefaultStatus:    http.StatusCreated,
+		MaxBodyBytes:     httpx.MaxUploadBodyBytes,
+		SkipValidateBody: true,
+		Security:         bearerSecurity,
+		Tags:             []string{"Document"},
+	}, h.handleAttachFile)
+	if pathItem := api.OpenAPI().Paths["/api/v1/documents/upload"]; pathItem != nil && pathItem.Post != nil {
+		pathItem.Post.RequestBody = &huma.RequestBody{
+			Content: map[string]*huma.MediaType{
+				"application/json": {Schema: uploadSchema},
+			},
+		}
 	}
 
+	gliByLeaseSchema := huma.SchemaFromType(api.OpenAPI().Components.Schemas, reflect.TypeFor[AssembleGLIDossierByLeaseBody]())
+	huma.Register(api, huma.Operation{
+		OperationID:      "assembleGliDossierByLease",
+		Method:           http.MethodPost,
+		Path:             "/api/v1/leases/{id}/gli-dossier",
+		Summary:          "Assemble a 1-click GLI claim ZIP dossier for a lease",
+		DefaultStatus:    http.StatusCreated,
+		SkipValidateBody: true,
+		Security:         bearerSecurity,
+		Tags:             []string{"Document"},
+	}, h.handleAssembleGLIDossier)
+	if pathItem := api.OpenAPI().Paths["/api/v1/leases/{id}/gli-dossier"]; pathItem != nil && pathItem.Post != nil {
+		pathItem.Post.RequestBody = &huma.RequestBody{
+			Required: false,
+			Content: map[string]*huma.MediaType{
+				"application/json": {Schema: gliByLeaseSchema},
+			},
+		}
+	}
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "assembleGliDossier",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/documents/gli-dossier",
+		Summary:       "Assemble a 1-click GLI claim ZIP dossier",
+		DefaultStatus: http.StatusCreated,
+		Security:      bearerSecurity,
+		Tags:          []string{"Document"},
+	}, h.handleAssembleGLIDossierBody)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "listLeaseDocuments",
+		Method:        http.MethodGet,
+		Path:          "/api/v1/leases/{id}/documents",
+		Summary:       "List stored documents and attachments for a lease",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Document"},
+	}, h.handleListLeaseDocuments)
+}
+
+func (h *Handler) handleRegisterTemplate(ctx context.Context, in *registerTemplateInput) (*documentTemplateOutput, error) {
 	var docxBytes []byte
-	if strings.TrimSpace(req.DocxBase64) != "" {
-		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(req.DocxBase64))
+	if strings.TrimSpace(in.Body.DocxBase64) != "" {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(in.Body.DocxBase64))
 		if err != nil {
-			httpx.BadRequest(w, "invalid docx_base64 payload")
-			return
+			return nil, httpx.StatusError(http.StatusBadRequest, "invalid docx_base64 payload")
 		}
 		docxBytes = decoded
 	}
 
-	dto, err := h.svc.RegisterTemplate(r.Context(), application.RegisterTemplateCmd{
-		Name:         req.Name,
-		TemplateType: req.TemplateType,
-		Format:       req.Format,
+	dto, err := h.svc.RegisterTemplate(ctx, application.RegisterTemplateCmd{
+		Name:         in.Body.Name,
+		TemplateType: in.Body.TemplateType,
+		Format:       in.Body.Format,
 		DocxBytes:    docxBytes,
-		HTMLBody:     req.HTMLBody,
+		HTMLBody:     in.Body.HTMLBody,
 	})
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.Created(w, dto)
+	return &documentTemplateOutput{Body: dto}, nil
 }
 
-func (h *Handler) handleListTemplates(w http.ResponseWriter, r *http.Request) {
-	list, err := h.svc.ListTemplates(r.Context())
+func (h *Handler) handleListTemplates(ctx context.Context, _ *struct{}) (*documentTemplateListOutput, error) {
+	list, err := h.svc.ListTemplates(ctx)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
 	if list == nil {
 		list = []application.DocumentTemplateDTO{}
 	}
-	httpx.OK(w, list)
+	return &documentTemplateListOutput{Body: list}, nil
 }
 
-func (h *Handler) handleGenerateFromTemplate(w http.ResponseWriter, r *http.Request) {
-	var cmd application.GenerateDocCmd
-	if err := httpx.DecodeJSON(r, &cmd); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
-
-	dto, err := h.svc.GenerateFromTemplate(r.Context(), cmd)
+func (h *Handler) handleGenerateFromTemplate(ctx context.Context, in *generateFromTemplateInput) (*storedFileOutput, error) {
+	dto, err := h.svc.GenerateFromTemplate(ctx, in.Body)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.Created(w, dto)
+	return &storedFileOutput{Body: dto}, nil
 }
 
-func (h *Handler) handleAttachFile(w http.ResponseWriter, r *http.Request) {
-	contentType := strings.ToLower(r.Header.Get("Content-Type"))
+func (h *Handler) handleAttachFile(ctx context.Context, in *attachFileInput) (*storedFileOutput, error) {
+	contentType := strings.ToLower(in.ContentType)
 	var cmd application.AttachFileCmd
 
 	if strings.Contains(contentType, "multipart/form-data") {
-		r.Body = http.MaxBytesReader(w, r.Body, httpx.MaxUploadBodyBytes)
-		if err := r.ParseMultipartForm(20 << 20); err != nil {
-			httpx.BadRequest(w, "invalid multipart form")
-			return
+		_, params, err := mime.ParseMediaType(in.ContentType)
+		if err != nil || params["boundary"] == "" {
+			return nil, httpx.StatusError(http.StatusBadRequest, "invalid multipart form")
 		}
-		cmd.LegalEntityID = strings.TrimSpace(r.FormValue("legal_entity_id"))
-		cmd.LeaseID = strings.TrimSpace(r.FormValue("lease_id"))
-		cmd.Category = strings.TrimSpace(r.FormValue("category"))
-
-		file, hdr, err := r.FormFile("file")
+		mr := multipart.NewReader(bytes.NewReader(in.RawBody), params["boundary"])
+		form, err := mr.ReadForm(20 << 20)
 		if err != nil {
-			httpx.BadRequest(w, "missing file field")
-			return
+			return nil, httpx.StatusError(http.StatusBadRequest, "invalid multipart form")
+		}
+		defer func() { _ = form.RemoveAll() }()
+		if len(form.Value["legal_entity_id"]) > 0 {
+			cmd.LegalEntityID = strings.TrimSpace(form.Value["legal_entity_id"][0])
+		}
+		if len(form.Value["lease_id"]) > 0 {
+			cmd.LeaseID = strings.TrimSpace(form.Value["lease_id"][0])
+		}
+		if len(form.Value["category"]) > 0 {
+			cmd.Category = strings.TrimSpace(form.Value["category"][0])
+		}
+		files := form.File["file"]
+		if len(files) == 0 {
+			return nil, httpx.StatusError(http.StatusBadRequest, "missing file field")
+		}
+		file, err := files[0].Open()
+		if err != nil {
+			return nil, httpx.StatusError(http.StatusBadRequest, "failed to read uploaded file")
 		}
 		defer file.Close()
 		raw, err := io.ReadAll(file)
 		if err != nil {
-			httpx.BadRequest(w, "failed to read uploaded file")
-			return
+			return nil, httpx.StatusError(http.StatusBadRequest, "failed to read uploaded file")
 		}
-		cmd.FileName = hdr.Filename
-		cmd.ContentType = hdr.Header.Get("Content-Type")
+		cmd.FileName = files[0].Filename
+		cmd.ContentType = files[0].Header.Get("Content-Type")
 		cmd.Content = raw
 	} else {
-		var body struct {
-			LegalEntityID string `json:"legal_entity_id"`
-			LeaseID       string `json:"lease_id"`
-			Category      string `json:"category"`
-			FileName      string `json:"file_name"`
-			ContentType   string `json:"content_type"`
-			ContentBase64 string `json:"content_base64"`
-		}
-		if r.Body != nil {
-			r.Body = http.MaxBytesReader(w, r.Body, httpx.MaxUploadBodyBytes)
-		}
-		if err := httpx.DecodeJSONWithLimit(r, &body, httpx.MaxUploadBodyBytes); err != nil {
-			httpx.BadRequest(w, err.Error())
-			return
+		var body UploadDocumentBody
+		if err := json.Unmarshal(in.RawBody, &body); err != nil {
+			return nil, httpx.StatusError(http.StatusBadRequest, err.Error())
 		}
 		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body.ContentBase64))
 		if err != nil {
-			httpx.BadRequest(w, "invalid content_base64")
-			return
+			return nil, httpx.StatusError(http.StatusBadRequest, "invalid content_base64")
 		}
 		cmd = application.AttachFileCmd{
 			LegalEntityID: body.LegalEntityID,
@@ -163,83 +311,63 @@ func (h *Handler) handleAttachFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	dto, err := h.svc.AttachFileToR2(r.Context(), cmd)
+	dto, err := h.svc.AttachFileToR2(ctx, cmd)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.Created(w, dto)
+	return &storedFileOutput{Body: dto}, nil
 }
 
-func (h *Handler) handleAssembleGLIDossier(w http.ResponseWriter, r *http.Request) {
-	leaseID := r.PathValue("id")
-	templateID := strings.TrimSpace(r.URL.Query().Get("template_id"))
-	if r.Body != nil && r.ContentLength != 0 {
-		var body struct {
-			TemplateID string `json:"template_id"`
-		}
-		if err := httpx.DecodeJSON(r, &body); err == nil && strings.TrimSpace(body.TemplateID) != "" {
+func (h *Handler) handleAssembleGLIDossier(ctx context.Context, in *assembleGLIDossierByLeaseInput) (*gliDossierOutput, error) {
+	templateID := strings.TrimSpace(in.TemplateID)
+	if trimmed := bytes.TrimSpace(in.RawBody); len(trimmed) > 0 {
+		var body AssembleGLIDossierByLeaseBody
+		if err := json.Unmarshal(trimmed, &body); err == nil && strings.TrimSpace(body.TemplateID) != "" {
 			templateID = strings.TrimSpace(body.TemplateID)
 		}
 	}
 
-	dto, err := h.svc.AssembleGLIDossier(r.Context(), leaseID, templateID)
+	dto, err := h.svc.AssembleGLIDossier(ctx, in.ID, templateID)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.Created(w, dto)
+	return &gliDossierOutput{Body: dto}, nil
 }
 
-func (h *Handler) handleAssembleGLIDossierBody(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		LeaseID    string `json:"lease_id"`
-		TemplateID string `json:"template_id"`
-	}
-	if err := httpx.DecodeJSON(r, &body); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
-
-	dto, err := h.svc.AssembleGLIDossier(r.Context(), body.LeaseID, body.TemplateID)
+func (h *Handler) handleAssembleGLIDossierBody(ctx context.Context, in *assembleGLIDossierBodyInput) (*gliDossierOutput, error) {
+	dto, err := h.svc.AssembleGLIDossier(ctx, in.Body.LeaseID, in.Body.TemplateID)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.Created(w, dto)
+	return &gliDossierOutput{Body: dto}, nil
 }
 
-func (h *Handler) handleListLeaseDocuments(w http.ResponseWriter, r *http.Request) {
-	leaseID := r.PathValue("id")
-	files, err := h.svc.ListStoredFilesByLease(r.Context(), leaseID)
+func (h *Handler) handleListLeaseDocuments(ctx context.Context, in *leaseIDInput) (*storedFileListOutput, error) {
+	files, err := h.svc.ListStoredFilesByLease(ctx, in.ID)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
 	if files == nil {
 		files = []application.StoredFileDTO{}
 	}
-	httpx.OK(w, files)
+	return &storedFileListOutput{Body: files}, nil
 }
 
-func writeDomainError(w http.ResponseWriter, err error) {
+func mapDomainError(err error) error {
 	switch {
 	case errors.Is(err, domain.ErrValidation),
 		errors.Is(err, domain.ErrNoUnpaidRentForGLI),
 		errors.Is(err, leasedomain.ErrValidation),
 		errors.Is(err, portfoliodomain.ErrValidation):
-		httpx.UnprocessableEntity(w, err.Error())
+		return httpx.StatusError(http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, domain.ErrTemplateNotFound),
 		errors.Is(err, domain.ErrStoredFileNotFound),
 		errors.Is(err, domain.ErrGLIDossierNotFound),
 		errors.Is(err, leasedomain.ErrLeaseNotFound),
 		errors.Is(err, leasedomain.ErrTenantNotFound),
 		errors.Is(err, portfoliodomain.ErrLegalEntityNotFound):
-		httpx.NotFound(w, err.Error())
+		return httpx.StatusError(http.StatusNotFound, err.Error())
 	default:
-		httpx.LogInternalError(w, "internal document error", err)
+		return httpx.StatusError(http.StatusInternalServerError, "internal document error")
 	}
 }

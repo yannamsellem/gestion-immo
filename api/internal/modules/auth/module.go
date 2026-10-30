@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/application"
@@ -91,6 +92,11 @@ func (m *Module) Authority() *domain.TokenAuthority {
 // RegisterHTTPRoutes registers all auth and SUPER_ADMIN user approval HTTP routes on mux.
 func (m *Module) RegisterHTTPRoutes(mux *http.ServeMux) {
 	m.handler.RegisterRoutes(mux)
+}
+
+// RegisterHumaRoutes registers all auth and SUPER_ADMIN user approval routes on api.
+func (m *Module) RegisterHumaRoutes(api huma.API) {
+	m.handler.RegisterHumaRoutes(api)
 }
 
 // RequireAuthMiddleware returns an HTTP middleware that validates Bearer JWTs and checks active user approval.

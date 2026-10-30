@@ -1,8 +1,11 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"net/http"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/application"
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
@@ -19,134 +22,217 @@ func NewHandler(svc *application.Service) *Handler {
 	return &Handler{svc: svc}
 }
 
+type createEntityInput struct {
+	Body application.CreateLegalEntityCmd
+}
+
+type entityOutput struct {
+	Body application.LegalEntityDTO
+}
+
+type entityListOutput struct {
+	Body []application.LegalEntityDTO
+}
+
+type entityIDInput struct {
+	ID string `path:"id"`
+}
+
+type entitySummaryOutput struct {
+	Body application.EntityPortfolioSummaryDTO
+}
+
+type upsertShareholderInput struct {
+	ID   string `path:"id"`
+	Body application.UpsertShareholderCmd
+}
+
+type shareholderOutput struct {
+	Body application.ShareholderDTO
+}
+
+type createPropertyInput struct {
+	ID   string `path:"id"`
+	Body application.CreatePropertyCmd
+}
+
+type propertyOutput struct {
+	Body application.PropertyDTO
+}
+
+type propertyListOutput struct {
+	Body []application.PropertyDTO
+}
+
+type createLotInput struct {
+	ID   string `path:"id"`
+	Body application.CreateLotCmd
+}
+
+type lotOutput struct {
+	Body application.LotDTO
+}
+
 // RegisterRoutes mounts all portfolio REST endpoints on the Go 1.22+ ServeMux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/entities", h.handleCreateEntity)
-	mux.HandleFunc("GET /api/v1/entities", h.handleListEntities)
-	mux.HandleFunc("GET /api/v1/entities/{id}", h.handleGetEntitySummary)
-	mux.HandleFunc("POST /api/v1/entities/{id}/shareholders", h.handleUpsertShareholder)
-	mux.HandleFunc("POST /api/v1/entities/{id}/properties", h.handleCreateProperty)
-	mux.HandleFunc("GET /api/v1/entities/{id}/properties", h.handleListProperties)
-	mux.HandleFunc("POST /api/v1/properties/{id}/lots", h.handleCreateLot)
+	h.RegisterHumaRoutes(httpx.NewHumaAPI(mux))
 }
 
-func (h *Handler) handleCreateEntity(w http.ResponseWriter, r *http.Request) {
-	var cmd application.CreateLegalEntityCmd
-	if err := httpx.DecodeJSON(r, &cmd); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
+// RegisterHumaRoutes registers all portfolio REST endpoints onto a Huma API.
+func (h *Handler) RegisterHumaRoutes(api huma.API) {
+	bearerSecurity := []map[string][]string{{"bearerAuth": {}}}
 
-	dto, err := h.svc.CreateLegalEntity(r.Context(), cmd)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
+	huma.Register(api, huma.Operation{
+		OperationID:   "createEntity",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/entities",
+		Summary:       "Create a legal entity (SCI, SARL, LMNP, LMP, own name)",
+		DefaultStatus: http.StatusCreated,
+		Security:      bearerSecurity,
+		Tags:          []string{"Portfolio"},
+	}, h.handleCreateEntity)
 
-	httpx.Created(w, dto)
+	huma.Register(api, huma.Operation{
+		OperationID:   "listEntities",
+		Method:        http.MethodGet,
+		Path:          "/api/v1/entities",
+		Summary:       "List all legal entities",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Portfolio"},
+	}, h.handleListEntities)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "getEntitySummary",
+		Method:        http.MethodGet,
+		Path:          "/api/v1/entities/{id}",
+		Summary:       "Get a legal entity summary with shareholders, properties, and lots",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Portfolio"},
+	}, h.handleGetEntitySummary)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "upsertShareholder",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/entities/{id}/shareholders",
+		Summary:       "Create or update a shareholder on a legal entity",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Portfolio"},
+	}, h.handleUpsertShareholder)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "createProperty",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/entities/{id}/properties",
+		Summary:       "Create a real estate property under a legal entity",
+		DefaultStatus: http.StatusCreated,
+		Security:      bearerSecurity,
+		Tags:          []string{"Portfolio"},
+	}, h.handleCreateProperty)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "listProperties",
+		Method:        http.MethodGet,
+		Path:          "/api/v1/entities/{id}/properties",
+		Summary:       "List properties and lots belonging to a legal entity",
+		DefaultStatus: http.StatusOK,
+		Security:      bearerSecurity,
+		Tags:          []string{"Portfolio"},
+	}, h.handleListProperties)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "createLot",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/properties/{id}/lots",
+		Summary:       "Create a rentable lot within a property",
+		DefaultStatus: http.StatusCreated,
+		Security:      bearerSecurity,
+		Tags:          []string{"Portfolio"},
+	}, h.handleCreateLot)
 }
 
-func (h *Handler) handleListEntities(w http.ResponseWriter, r *http.Request) {
-	entities, err := h.svc.ListLegalEntities(r.Context())
+func (h *Handler) handleCreateEntity(ctx context.Context, in *createEntityInput) (*entityOutput, error) {
+	dto, err := h.svc.CreateLegalEntity(ctx, in.Body)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
+	}
+	return &entityOutput{Body: dto}, nil
+}
+
+func (h *Handler) handleListEntities(ctx context.Context, _ *struct{}) (*entityListOutput, error) {
+	entities, err := h.svc.ListLegalEntities(ctx)
+	if err != nil {
+		return nil, mapDomainError(err)
 	}
 	if entities == nil {
 		entities = []application.LegalEntityDTO{}
 	}
-
-	httpx.OK(w, entities)
+	return &entityListOutput{Body: entities}, nil
 }
 
-func (h *Handler) handleGetEntitySummary(w http.ResponseWriter, r *http.Request) {
-	entityID := r.PathValue("id")
-	summary, err := h.svc.GetEntityPortfolioSummary(r.Context(), entityID)
+func (h *Handler) handleGetEntitySummary(ctx context.Context, in *entityIDInput) (*entitySummaryOutput, error) {
+	summary, err := h.svc.GetEntityPortfolioSummary(ctx, in.ID)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.OK(w, summary)
+	return &entitySummaryOutput{Body: summary}, nil
 }
 
-func (h *Handler) handleUpsertShareholder(w http.ResponseWriter, r *http.Request) {
-	var cmd application.UpsertShareholderCmd
-	if err := httpx.DecodeJSON(r, &cmd); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
-	cmd.LegalEntityID = r.PathValue("id")
-
-	dto, err := h.svc.UpsertShareholder(r.Context(), cmd)
+func (h *Handler) handleUpsertShareholder(ctx context.Context, in *upsertShareholderInput) (*shareholderOutput, error) {
+	cmd := in.Body
+	cmd.LegalEntityID = in.ID
+	dto, err := h.svc.UpsertShareholder(ctx, cmd)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.OK(w, dto)
+	return &shareholderOutput{Body: dto}, nil
 }
 
-func (h *Handler) handleCreateProperty(w http.ResponseWriter, r *http.Request) {
-	var cmd application.CreatePropertyCmd
-	if err := httpx.DecodeJSON(r, &cmd); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
-	cmd.LegalEntityID = r.PathValue("id")
-
-	dto, err := h.svc.CreateProperty(r.Context(), cmd)
+func (h *Handler) handleCreateProperty(ctx context.Context, in *createPropertyInput) (*propertyOutput, error) {
+	cmd := in.Body
+	cmd.LegalEntityID = in.ID
+	dto, err := h.svc.CreateProperty(ctx, cmd)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.Created(w, dto)
+	return &propertyOutput{Body: dto}, nil
 }
 
-func (h *Handler) handleListProperties(w http.ResponseWriter, r *http.Request) {
-	entityID := r.PathValue("id")
-	props, err := h.svc.ListProperties(r.Context(), entityID)
+func (h *Handler) handleListProperties(ctx context.Context, in *entityIDInput) (*propertyListOutput, error) {
+	props, err := h.svc.ListProperties(ctx, in.ID)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
 	if props == nil {
 		props = []application.PropertyDTO{}
 	}
-
-	httpx.OK(w, props)
+	return &propertyListOutput{Body: props}, nil
 }
 
-func (h *Handler) handleCreateLot(w http.ResponseWriter, r *http.Request) {
-	var cmd application.CreateLotCmd
-	if err := httpx.DecodeJSON(r, &cmd); err != nil {
-		httpx.BadRequest(w, err.Error())
-		return
-	}
-	cmd.PropertyID = r.PathValue("id")
-
-	dto, err := h.svc.CreateLot(r.Context(), cmd)
+func (h *Handler) handleCreateLot(ctx context.Context, in *createLotInput) (*lotOutput, error) {
+	cmd := in.Body
+	cmd.PropertyID = in.ID
+	dto, err := h.svc.CreateLot(ctx, cmd)
 	if err != nil {
-		writeDomainError(w, err)
-		return
+		return nil, mapDomainError(err)
 	}
-
-	httpx.Created(w, dto)
+	return &lotOutput{Body: dto}, nil
 }
 
-func writeDomainError(w http.ResponseWriter, err error) {
+func mapDomainError(err error) error {
 	switch {
 	case errors.Is(err, domain.ErrValidation):
-		httpx.UnprocessableEntity(w, err.Error())
+		return httpx.StatusError(http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, domain.ErrDuplicateSIRET):
-		httpx.Conflict(w, err.Error())
+		return httpx.StatusError(http.StatusConflict, err.Error())
 	case errors.Is(err, domain.ErrLegalEntityNotFound),
 		errors.Is(err, domain.ErrPropertyNotFound),
 		errors.Is(err, domain.ErrLotNotFound),
 		errors.Is(err, domain.ErrShareholderNotFound):
-		httpx.NotFound(w, err.Error())
+		return httpx.StatusError(http.StatusNotFound, err.Error())
 	default:
-		httpx.LogInternalError(w, "internal portfolio error", err)
+		return httpx.StatusError(http.StatusInternalServerError, "internal portfolio error")
 	}
 }
