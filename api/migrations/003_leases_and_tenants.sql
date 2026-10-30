@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS tenants (
-    id TEXT PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
     full_name TEXT NOT NULL,
     email TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
@@ -13,10 +13,10 @@ CREATE TABLE IF NOT EXISTS tenants (
 CREATE INDEX IF NOT EXISTS idx_tenants_archived ON tenants(archived);
 
 CREATE TABLE IF NOT EXISTS leases (
-    id TEXT PRIMARY KEY,
-    legal_entity_id TEXT NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
-    lot_id TEXT NOT NULL REFERENCES lots(id) ON DELETE RESTRICT,
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    legal_entity_id UUID NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
+    lot_id UUID NOT NULL REFERENCES lots(id) ON DELETE RESTRICT,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     lease_type TEXT NOT NULL CHECK (lease_type IN ('RESIDENTIAL_UNFURNISHED', 'RESIDENTIAL_FURNISHED', 'COMMERCIAL_3_6_9', 'PROFESSIONAL', 'PARKING', 'SHORT_TERM')),
     rent_net_cents BIGINT NOT NULL DEFAULT 0 CHECK (rent_net_cents >= 0),
     charges_cents BIGINT NOT NULL DEFAULT 0 CHECK (charges_cents >= 0),
@@ -38,10 +38,10 @@ CREATE INDEX IF NOT EXISTS idx_leases_lot_id ON leases(lot_id);
 CREATE INDEX IF NOT EXISTS idx_leases_tenant_id ON leases(tenant_id);
 
 CREATE TABLE IF NOT EXISTS rent_calls (
-    id TEXT PRIMARY KEY,
-    lease_id TEXT NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
-    legal_entity_id TEXT NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    lease_id UUID NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+    legal_entity_id UUID NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     period_month TEXT NOT NULL,
     rent_net_cents BIGINT NOT NULL DEFAULT 0,
     vat_cents BIGINT NOT NULL DEFAULT 0,
@@ -57,7 +57,11 @@ CREATE TABLE IF NOT EXISTS rent_calls (
 
 CREATE INDEX IF NOT EXISTS idx_rent_calls_legal_entity_id ON rent_calls(legal_entity_id);
 CREATE INDEX IF NOT EXISTS idx_rent_calls_lease_id ON rent_calls(lease_id);
+CREATE INDEX IF NOT EXISTS idx_rent_calls_tenant_id ON rent_calls(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_rent_calls_status ON rent_calls(status);
+CREATE INDEX IF NOT EXISTS idx_rent_calls_lease_unpaid_order
+    ON rent_calls(lease_id, due_date ASC, period_month ASC)
+    WHERE remaining_due_cents > 0 AND status <> 'PAID';
 
 ---- create above / drop below ----
 

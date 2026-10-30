@@ -1,15 +1,6 @@
-CREATE TABLE IF NOT EXISTS pcg_accounts (
-    code TEXT PRIMARY KEY,
-    label TEXT NOT NULL,
-    account_class INT NOT NULL CHECK (account_class BETWEEN 1 AND 8),
-    section TEXT NOT NULL DEFAULT '',
-    cerfa_code TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS journal_entries (
-    id TEXT PRIMARY KEY,
-    legal_entity_id TEXT NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    legal_entity_id UUID NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
     fiscal_year INT NOT NULL CHECK (fiscal_year >= 1900),
     journal_code TEXT NOT NULL DEFAULT 'OD',
     journal_label TEXT NOT NULL DEFAULT 'General Journal',
@@ -26,9 +17,9 @@ CREATE INDEX IF NOT EXISTS idx_journal_entries_entity_year ON journal_entries(le
 CREATE INDEX IF NOT EXISTS idx_journal_entries_entry_date ON journal_entries(entry_date);
 
 CREATE TABLE IF NOT EXISTS journal_lines (
-    id TEXT PRIMARY KEY,
-    journal_entry_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
-    legal_entity_id TEXT NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    journal_entry_id UUID NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+    legal_entity_id UUID NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
     fiscal_year INT NOT NULL,
     line_id TEXT NOT NULL DEFAULT '',
     account_code TEXT NOT NULL,
@@ -52,8 +43,8 @@ CREATE INDEX IF NOT EXISTS idx_journal_lines_entity_year ON journal_lines(legal_
 CREATE INDEX IF NOT EXISTS idx_journal_lines_account_code ON journal_lines(account_code);
 
 CREATE TABLE IF NOT EXISTS account_balance_lines (
-    id TEXT PRIMARY KEY,
-    legal_entity_id TEXT NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    legal_entity_id UUID NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
     fiscal_year INT NOT NULL CHECK (fiscal_year >= 1900),
     line_id TEXT NOT NULL,
     account_code TEXT NOT NULL,
@@ -72,8 +63,8 @@ CREATE TABLE IF NOT EXISTS account_balance_lines (
 CREATE INDEX IF NOT EXISTS idx_account_balance_lines_entity_year ON account_balance_lines(legal_entity_id, fiscal_year);
 
 CREATE TABLE IF NOT EXISTS annual_account_reports (
-    id TEXT PRIMARY KEY,
-    legal_entity_id TEXT NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    legal_entity_id UUID NOT NULL REFERENCES legal_entities(id) ON DELETE CASCADE,
     fiscal_year INT NOT NULL CHECK (fiscal_year >= 1900),
     disabled_line_ids TEXT[] NOT NULL DEFAULT '{}',
     net_income_n_cents BIGINT NOT NULL DEFAULT 0,
@@ -91,4 +82,3 @@ DROP TABLE IF EXISTS annual_account_reports;
 DROP TABLE IF EXISTS account_balance_lines;
 DROP TABLE IF EXISTS journal_lines;
 DROP TABLE IF EXISTS journal_entries;
-DROP TABLE IF EXISTS pcg_accounts;
