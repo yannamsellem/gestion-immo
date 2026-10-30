@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -54,6 +55,9 @@ func (r *ShareholderRepo) UpsertShareholder(ctx context.Context, sh domain.Share
 
 // ListShareholdersByEntity lists all shareholders belonging to a legal entity.
 func (r *ShareholderRepo) ListShareholdersByEntity(ctx context.Context, entityID string) ([]domain.Shareholder, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.Shareholder{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, full_name, shares_count, detention_basis_points,
 		       current_account_cents, remuneration_paid_cents, created_at, updated_at
@@ -98,6 +102,9 @@ func scanShareholder(row pgx.Row) (*domain.Shareholder, error) {
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrShareholderNotFound
+		}
+		if postgres.IsForeignKeyViolation(err) {
+			return nil, fmt.Errorf("%w: referenced legal entity does not exist", domain.ErrValidation)
 		}
 		return nil, fmt.Errorf("portfolio/postgres/shareholder_repo: scan shareholder: %w", err)
 	}

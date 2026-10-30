@@ -48,12 +48,12 @@ func (c LoginCommand) LogValue() slog.Value {
 
 // UserDTO is an immutable projection of a domain.User safe for external transport.
 type UserDTO struct {
-	ID         string            `json:"id"`
+	ID         string            `json:"id" format:"uuid"`
 	FullName   string            `json:"full_name"`
 	Email      string            `json:"email"`
 	Role       domain.UserRole   `json:"role"`
 	Status     domain.UserStatus `json:"status"`
-	ApprovedBy *string           `json:"approved_by,omitempty"`
+	ApprovedBy *string           `json:"approved_by,omitempty" format:"uuid"`
 	ApprovedAt *time.Time        `json:"approved_at,omitempty"`
 	CreatedAt  time.Time         `json:"created_at"`
 }
@@ -143,7 +143,7 @@ func (s *Service) BootstrapSuperAdmin(ctx context.Context, email string, passwor
 		return toUserDTO(*existing), nil
 	}
 
-	userID, err := id.Generate("usr")
+	userID, err := id.NewV7()
 	if err != nil {
 		return UserDTO{}, err
 	}
@@ -192,7 +192,7 @@ func (s *Service) Signup(ctx context.Context, cmd SignupCommand) (UserDTO, error
 		return UserDTO{}, err
 	}
 
-	userID, err := id.Generate("usr")
+	userID, err := id.NewV7()
 	if err != nil {
 		return UserDTO{}, err
 	}
@@ -220,7 +220,12 @@ func (s *Service) ApproveUser(ctx context.Context, actorUserID string, targetUse
 		return UserDTO{}, err
 	}
 
-	target, err := s.userRepo.FindUserByID(ctx, strings.TrimSpace(targetUserID))
+	trimmedTargetID := strings.TrimSpace(targetUserID)
+	if !id.IsValidUUID(trimmedTargetID) {
+		return UserDTO{}, fmt.Errorf("%w: invalid user_id", domain.ErrValidation)
+	}
+
+	target, err := s.userRepo.FindUserByID(ctx, trimmedTargetID)
 	if err != nil {
 		return UserDTO{}, err
 	}
@@ -244,7 +249,12 @@ func (s *Service) RejectUser(ctx context.Context, actorUserID string, targetUser
 		return UserDTO{}, err
 	}
 
-	target, err := s.userRepo.FindUserByID(ctx, strings.TrimSpace(targetUserID))
+	trimmedTargetID := strings.TrimSpace(targetUserID)
+	if !id.IsValidUUID(trimmedTargetID) {
+		return UserDTO{}, fmt.Errorf("%w: invalid user_id", domain.ErrValidation)
+	}
+
+	target, err := s.userRepo.FindUserByID(ctx, trimmedTargetID)
 	if err != nil {
 		return UserDTO{}, err
 	}
@@ -358,7 +368,12 @@ func (s *Service) Logout(ctx context.Context, rawRefreshToken secret.String) err
 
 // CreateMCPToken creates a long-lived Bearer token for Antigravity MCP access, storing only its SHA-256 hash.
 func (s *Service) CreateMCPToken(ctx context.Context, userID string, label string) (secret.String, error) {
-	user, err := s.userRepo.FindUserByID(ctx, strings.TrimSpace(userID))
+	trimmedUserID := strings.TrimSpace(userID)
+	if !id.IsValidUUID(trimmedUserID) {
+		return secret.String{}, fmt.Errorf("%w: invalid user_id", domain.ErrValidation)
+	}
+
+	user, err := s.userRepo.FindUserByID(ctx, trimmedUserID)
 	if err != nil {
 		return secret.String{}, err
 	}
@@ -371,14 +386,14 @@ func (s *Service) CreateMCPToken(ctx context.Context, userID string, label strin
 		trimmedLabel = "antigravity-mcp"
 	}
 
-	rawTokenStr, err := id.Generate("mcp_live")
+	rawTokenStr, err := secret.GeneratePrefixedToken("mcp_live")
 	if err != nil {
 		return secret.String{}, err
 	}
 	rawSecret := secret.New(rawTokenStr)
 	tokenHash := s.hasher.HashToken(rawSecret)
 
-	tokID, err := id.Generate("mcptok")
+	tokID, err := id.NewV7()
 	if err != nil {
 		return secret.String{}, err
 	}
@@ -480,7 +495,7 @@ func (s *Service) issueInitialTokens(ctx context.Context, user domain.User) (Aut
 		return AuthTokensDTO{}, err
 	}
 
-	familyID, err := id.Generate("rtfam")
+	familyID, err := id.NewV7()
 	if err != nil {
 		return AuthTokensDTO{}, err
 	}
@@ -533,14 +548,14 @@ func (s *Service) ValidateMCPBearer(ctx context.Context, rawBearer string) (stri
 }
 
 func (s *Service) buildRefreshTokenRecord(userID string, familyID string, now time.Time) (secret.String, domain.RefreshTokenRecord, error) {
-	rawRefreshStr, err := id.Generate("rt_live")
+	rawRefreshStr, err := secret.GenerateToken()
 	if err != nil {
 		return secret.String{}, domain.RefreshTokenRecord{}, err
 	}
 	rawRefresh := secret.New(rawRefreshStr)
 	refreshHash := s.hasher.HashToken(rawRefresh)
 
-	recID, err := id.Generate("rt")
+	recID, err := id.NewV7()
 	if err != nil {
 		return secret.String{}, domain.RefreshTokenRecord{}, err
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -45,13 +46,19 @@ func (r *PropertyRepo) CreateProperty(ctx context.Context, prop domain.Property)
 		prop.UpdatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced legal entity does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("portfolio/postgres/property_repo: create property: %w", err)
 	}
 	return nil
 }
 
 // FindPropertyByID retrieves a property by primary key.
-func (r *PropertyRepo) FindPropertyByID(ctx context.Context, id string) (*domain.Property, error) {
+func (r *PropertyRepo) FindPropertyByID(ctx context.Context, propertyID string) (*domain.Property, error) {
+	if !id.IsValidUUID(propertyID) {
+		return nil, domain.ErrPropertyNotFound
+	}
 	const query = `
 		SELECT id, legal_entity_id, label, property_type, accounting_category,
 		       address, acquisition_cents, work_stock_cents, total_book_value_cents,
@@ -59,12 +66,15 @@ func (r *PropertyRepo) FindPropertyByID(ctx context.Context, id string) (*domain
 		FROM properties
 		WHERE id = $1
 	`
-	row := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id)
+	row := postgres.Conn(ctx, r.db).QueryRow(ctx, query, propertyID)
 	return scanProperty(row)
 }
 
 // ListPropertiesByEntity lists all properties belonging to a legal entity.
 func (r *PropertyRepo) ListPropertiesByEntity(ctx context.Context, entityID string) ([]domain.Property, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.Property{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, label, property_type, accounting_category,
 		       address, acquisition_cents, work_stock_cents, total_book_value_cents,

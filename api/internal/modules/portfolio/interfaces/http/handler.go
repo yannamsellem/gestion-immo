@@ -35,7 +35,7 @@ type entityListOutput struct {
 }
 
 type entityIDInput struct {
-	ID string `path:"id"`
+	ID string `path:"id" format:"uuid"`
 }
 
 type entitySummaryOutput struct {
@@ -43,7 +43,7 @@ type entitySummaryOutput struct {
 }
 
 type upsertShareholderInput struct {
-	ID   string `path:"id"`
+	ID   string `path:"id" format:"uuid"`
 	Body application.UpsertShareholderCmd
 }
 
@@ -52,7 +52,7 @@ type shareholderOutput struct {
 }
 
 type createPropertyInput struct {
-	ID   string `path:"id"`
+	ID   string `path:"id" format:"uuid"`
 	Body application.CreatePropertyCmd
 }
 
@@ -65,7 +65,7 @@ type propertyListOutput struct {
 }
 
 type createLotInput struct {
-	ID   string `path:"id"`
+	ID   string `path:"id" format:"uuid"`
 	Body application.CreateLotCmd
 }
 

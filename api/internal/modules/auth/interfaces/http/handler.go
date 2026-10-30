@@ -109,7 +109,7 @@ type userListOutput struct {
 
 type userDecisionInput struct {
 	Authorization string `header:"Authorization"`
-	ID            string `path:"id"`
+	ID            string `path:"id" format:"uuid"`
 }
 
 // RegisterRoutes mounts all auth and admin user-approval endpoints onto mux.

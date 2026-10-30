@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	platformpg "github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -38,6 +39,9 @@ func (r *MCPTokenRepo) SaveMCPToken(ctx context.Context, token domain.MCPApiToke
 		token.CreatedAt,
 	)
 	if err != nil {
+		if platformpg.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced user does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("mcp_token_postgres_repo: save mcp token: %w", err)
 	}
 	return nil
@@ -71,6 +75,9 @@ func (r *MCPTokenRepo) FindMCPTokenByHash(ctx context.Context, tokenHash string)
 
 // RevokeAllUserMCPTokens revokes all active MCP API tokens belonging to userID.
 func (r *MCPTokenRepo) RevokeAllUserMCPTokens(ctx context.Context, userID string, revokedAt time.Time) error {
+	if !id.IsValidUUID(userID) {
+		return nil
+	}
 	const query = `
 		UPDATE mcp_api_tokens
 		SET revoked_at = $2

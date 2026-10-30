@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	platformpg "github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -46,6 +47,9 @@ func (r *UserRepo) CreateUser(ctx context.Context, user domain.User) error {
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return domain.ErrEmailAlreadyExists
 		}
+		if platformpg.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced user does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("user_postgres_repo: create user: %w", err)
 	}
 	return nil
@@ -53,6 +57,9 @@ func (r *UserRepo) CreateUser(ctx context.Context, user domain.User) error {
 
 // UpdateUser updates an existing user row in PostgreSQL.
 func (r *UserRepo) UpdateUser(ctx context.Context, user domain.User) error {
+	if !id.IsValidUUID(user.ID) {
+		return domain.ErrUserNotFound
+	}
 	const query = `
 		UPDATE users
 		SET full_name = $2,
@@ -77,6 +84,13 @@ func (r *UserRepo) UpdateUser(ctx context.Context, user domain.User) error {
 		user.UpdatedAt,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.ErrEmailAlreadyExists
+		}
+		if platformpg.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced user does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("user_postgres_repo: update user: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
@@ -86,13 +100,16 @@ func (r *UserRepo) UpdateUser(ctx context.Context, user domain.User) error {
 }
 
 // FindUserByID retrieves a user by primary key.
-func (r *UserRepo) FindUserByID(ctx context.Context, id string) (*domain.User, error) {
+func (r *UserRepo) FindUserByID(ctx context.Context, userID string) (*domain.User, error) {
+	if !id.IsValidUUID(userID) {
+		return nil, domain.ErrUserNotFound
+	}
 	const query = `
 		SELECT id, full_name, email, password_hash, role, status, approved_by, approved_at, created_at, updated_at
 		FROM users
 		WHERE id = $1
 	`
-	row := platformpg.Conn(ctx, r.db).QueryRow(ctx, query, id)
+	row := platformpg.Conn(ctx, r.db).QueryRow(ctx, query, userID)
 	return scanUser(row)
 }
 

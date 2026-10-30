@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -54,14 +55,17 @@ func (r *LegalEntityRepo) CreateLegalEntity(ctx context.Context, entity domain.L
 }
 
 // FindLegalEntityByID retrieves a legal entity by primary key.
-func (r *LegalEntityRepo) FindLegalEntityByID(ctx context.Context, id string) (*domain.LegalEntity, error) {
+func (r *LegalEntityRepo) FindLegalEntityByID(ctx context.Context, entityID string) (*domain.LegalEntity, error) {
+	if !id.IsValidUUID(entityID) {
+		return nil, domain.ErrLegalEntityNotFound
+	}
 	const query = `
 		SELECT id, name, entity_type, siret, naf_code, address,
 		       share_capital_cents, total_shares, created_at, updated_at
 		FROM legal_entities
 		WHERE id = $1
 	`
-	row := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id)
+	row := postgres.Conn(ctx, r.db).QueryRow(ctx, query, entityID)
 	return scanLegalEntity(row)
 }
 

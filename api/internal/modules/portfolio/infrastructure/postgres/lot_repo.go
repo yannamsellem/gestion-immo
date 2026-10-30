@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -37,6 +38,9 @@ func (r *LotRepo) CreateLot(ctx context.Context, lot domain.Lot) error {
 		lot.UpdatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced property does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("portfolio/postgres/lot_repo: create lot: %w", err)
 	}
 	return nil
@@ -44,6 +48,9 @@ func (r *LotRepo) CreateLot(ctx context.Context, lot domain.Lot) error {
 
 // ListLotsByProperty lists all lots belonging to a property.
 func (r *LotRepo) ListLotsByProperty(ctx context.Context, propertyID string) ([]domain.Lot, error) {
+	if !id.IsValidUUID(propertyID) {
+		return []domain.Lot{}, nil
+	}
 	grouped, err := r.ListLotsByPropertyIDs(ctx, []string{propertyID})
 	if err != nil {
 		return nil, err
@@ -54,17 +61,23 @@ func (r *LotRepo) ListLotsByProperty(ctx context.Context, propertyID string) ([]
 // ListLotsByPropertyIDs lists all lots belonging to any of propertyIDs grouped by property_id.
 func (r *LotRepo) ListLotsByPropertyIDs(ctx context.Context, propertyIDs []string) (map[string][]domain.Lot, error) {
 	grouped := make(map[string][]domain.Lot, len(propertyIDs))
-	if len(propertyIDs) == 0 {
+	validIDs := make([]string, 0, len(propertyIDs))
+	for _, propID := range propertyIDs {
+		if id.IsValidUUID(propID) {
+			validIDs = append(validIDs, propID)
+		}
+	}
+	if len(validIDs) == 0 {
 		return grouped, nil
 	}
 
 	const query = `
 		SELECT id, property_id, label, lot_type, surface_m2, ownership_share, floor, created_at, updated_at
 		FROM lots
-		WHERE property_id = ANY($1)
+		WHERE property_id = ANY($1::uuid[])
 		ORDER BY created_at ASC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, propertyIDs)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, validIDs)
 	if err != nil {
 		return nil, fmt.Errorf("portfolio/postgres/lot_repo: list lots: %w", err)
 	}

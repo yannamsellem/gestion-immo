@@ -24,7 +24,7 @@ type CreateLegalEntityCmd struct {
 
 // LegalEntityDTO is an immutable projection of a domain.LegalEntity.
 type LegalEntityDTO struct {
-	ID                string            `json:"id"`
+	ID                string            `json:"id" format:"uuid"`
 	Name              string            `json:"name"`
 	EntityType        domain.EntityType `json:"entity_type"`
 	SIRET             string            `json:"siret"`
@@ -38,7 +38,7 @@ type LegalEntityDTO struct {
 
 // UpsertShareholderCmd carries the input for creating or updating an associate (CERFA 2059-F).
 type UpsertShareholderCmd struct {
-	LegalEntityID         string            `json:"legal_entity_id,omitempty"`
+	LegalEntityID         string            `json:"legal_entity_id,omitempty" format:"uuid"`
 	FullName              string            `json:"full_name"`
 	SharesCount           int64             `json:"shares_count"`
 	CurrentAccountCents   money.AmountCents `json:"current_account_cents,omitempty"`
@@ -47,8 +47,8 @@ type UpsertShareholderCmd struct {
 
 // ShareholderDTO is an immutable projection of a domain.Shareholder.
 type ShareholderDTO struct {
-	ID                    string            `json:"id"`
-	LegalEntityID         string            `json:"legal_entity_id"`
+	ID                    string            `json:"id" format:"uuid"`
+	LegalEntityID         string            `json:"legal_entity_id" format:"uuid"`
 	FullName              string            `json:"full_name"`
 	SharesCount           int64             `json:"shares_count"`
 	DetentionBasisPoints  int64             `json:"detention_basis_points"`
@@ -60,7 +60,7 @@ type ShareholderDTO struct {
 
 // CreatePropertyCmd carries the input for adding a property asset to a legal entity.
 type CreatePropertyCmd struct {
-	LegalEntityID      string            `json:"legal_entity_id,omitempty"`
+	LegalEntityID      string            `json:"legal_entity_id,omitempty" format:"uuid"`
 	Label              string            `json:"label"`
 	PropertyType       string            `json:"property_type,omitempty"`
 	AccountingCategory string            `json:"accounting_category,omitempty"`
@@ -71,8 +71,8 @@ type CreatePropertyCmd struct {
 
 // PropertyDTO is an immutable projection of a domain.Property with its lots.
 type PropertyDTO struct {
-	ID                  string                    `json:"id"`
-	LegalEntityID       string                    `json:"legal_entity_id"`
+	ID                  string                    `json:"id" format:"uuid"`
+	LegalEntityID       string                    `json:"legal_entity_id" format:"uuid"`
 	Label               string                    `json:"label"`
 	PropertyType        string                    `json:"property_type"`
 	AccountingCategory  domain.AccountingCategory `json:"accounting_category"`
@@ -87,7 +87,7 @@ type PropertyDTO struct {
 
 // CreateLotCmd carries the input for adding a rentable lot to a property.
 type CreateLotCmd struct {
-	PropertyID     string `json:"property_id,omitempty"`
+	PropertyID     string `json:"property_id,omitempty" format:"uuid"`
 	Label          string `json:"label"`
 	LotType        string `json:"lot_type,omitempty"`
 	SurfaceM2      int64  `json:"surface_m2,omitempty"`
@@ -97,8 +97,8 @@ type CreateLotCmd struct {
 
 // LotDTO is an immutable projection of a domain.Lot.
 type LotDTO struct {
-	ID             string    `json:"id"`
-	PropertyID     string    `json:"property_id"`
+	ID             string    `json:"id" format:"uuid"`
+	PropertyID     string    `json:"property_id" format:"uuid"`
 	Label          string    `json:"label"`
 	LotType        string    `json:"lot_type"`
 	SurfaceM2      int64     `json:"surface_m2"`
@@ -170,7 +170,7 @@ func (s *Service) CreateLegalEntity(ctx context.Context, cmd CreateLegalEntityCm
 		totalShares = 100
 	}
 
-	entityID, err := id.Generate("ent")
+	entityID, err := id.NewV7()
 	if err != nil {
 		return LegalEntityDTO{}, err
 	}
@@ -215,6 +215,9 @@ func (s *Service) GetLegalEntityByID(ctx context.Context, entityID string) (Lega
 	if trimmedID == "" {
 		return LegalEntityDTO{}, fmt.Errorf("%w: entity id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmedID) {
+		return LegalEntityDTO{}, domain.ErrLegalEntityNotFound
+	}
 	ent, err := s.entityRepo.FindLegalEntityByID(ctx, trimmedID)
 	if err != nil {
 		return LegalEntityDTO{}, err
@@ -229,6 +232,9 @@ func (s *Service) UpsertShareholder(ctx context.Context, cmd UpsertShareholderCm
 	fullName := strings.TrimSpace(cmd.FullName)
 	if entityID == "" || fullName == "" {
 		return ShareholderDTO{}, fmt.Errorf("%w: legal_entity_id and full_name are required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(entityID) {
+		return ShareholderDTO{}, fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
 	}
 
 	entity, err := s.entityRepo.FindLegalEntityByID(ctx, entityID)
@@ -245,7 +251,7 @@ func (s *Service) UpsertShareholder(ctx context.Context, cmd UpsertShareholderCm
 
 	detentionBps := domain.ComputeDetentionBasisPoints(cmd.SharesCount, entity.TotalShares)
 
-	shID, err := id.Generate("sh")
+	shID, err := id.NewV7()
 	if err != nil {
 		return ShareholderDTO{}, err
 	}
@@ -300,6 +306,9 @@ func (s *Service) CreateProperty(ctx context.Context, cmd CreatePropertyCmd) (Pr
 	if entityID == "" || label == "" {
 		return PropertyDTO{}, fmt.Errorf("%w: legal_entity_id and label are required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(entityID) {
+		return PropertyDTO{}, fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
+	}
 
 	entity, err := s.entityRepo.FindLegalEntityByID(ctx, entityID)
 	if err != nil {
@@ -324,7 +333,7 @@ func (s *Service) CreateProperty(ctx context.Context, cmd CreatePropertyCmd) (Pr
 		return PropertyDTO{}, fmt.Errorf("%w: acquisition_cents and work_stock_cents cannot be negative", domain.ErrValidation)
 	}
 
-	propID, err := id.Generate("prop")
+	propID, err := id.NewV7()
 	if err != nil {
 		return PropertyDTO{}, err
 	}
@@ -356,6 +365,9 @@ func (s *Service) ListProperties(ctx context.Context, entityID string) ([]Proper
 	trimmedID := strings.TrimSpace(entityID)
 	if trimmedID == "" {
 		return nil, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmedID) {
+		return nil, fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
 	}
 
 	if _, err := s.entityRepo.FindLegalEntityByID(ctx, trimmedID); err != nil {
@@ -391,6 +403,9 @@ func (s *Service) CreateLot(ctx context.Context, cmd CreateLotCmd) (LotDTO, erro
 	if propID == "" || label == "" {
 		return LotDTO{}, fmt.Errorf("%w: property_id and label are required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(propID) {
+		return LotDTO{}, fmt.Errorf("%w: invalid property_id", domain.ErrValidation)
+	}
 
 	prop, err := s.propertyRepo.FindPropertyByID(ctx, propID)
 	if err != nil {
@@ -406,7 +421,7 @@ func (s *Service) CreateLot(ctx context.Context, cmd CreateLotCmd) (LotDTO, erro
 		lotType = "APARTMENT"
 	}
 
-	lotID, err := id.Generate("lot")
+	lotID, err := id.NewV7()
 	if err != nil {
 		return LotDTO{}, err
 	}
@@ -436,6 +451,9 @@ func (s *Service) GetEntityPortfolioSummary(ctx context.Context, entityID string
 	trimmedID := strings.TrimSpace(entityID)
 	if trimmedID == "" {
 		return EntityPortfolioSummaryDTO{}, fmt.Errorf("%w: entity id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmedID) {
+		return EntityPortfolioSummaryDTO{}, domain.ErrLegalEntityNotFound
 	}
 
 	entity, err := s.entityRepo.FindLegalEntityByID(ctx, trimmedID)

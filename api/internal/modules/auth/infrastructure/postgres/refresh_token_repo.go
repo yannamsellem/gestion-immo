@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	platformpg "github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -44,6 +45,9 @@ func (r *RefreshTokenRepo) SaveRefreshToken(ctx context.Context, record domain.R
 		record.CreatedAt,
 	)
 	if err != nil {
+		if platformpg.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced user does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("refresh_token_postgres_repo: save refresh token: %w", err)
 	}
 	return nil
@@ -78,6 +82,9 @@ func (r *RefreshTokenRepo) FindRefreshTokenByHash(ctx context.Context, tokenHash
 
 // RotateRefreshToken atomically inserts the successor refresh token and marks the predecessor as replaced/revoked.
 func (r *RefreshTokenRepo) RotateRefreshToken(ctx context.Context, oldTokenID string, newRecord domain.RefreshTokenRecord, rotatedAt time.Time) error {
+	if !id.IsValidUUID(oldTokenID) {
+		return domain.ErrInvalidToken
+	}
 	return platformpg.WithinTransaction(ctx, r.pool, func(txCtx context.Context) error {
 		conn := platformpg.Conn(txCtx, r.db)
 
@@ -95,6 +102,9 @@ func (r *RefreshTokenRepo) RotateRefreshToken(ctx context.Context, oldTokenID st
 			newRecord.RevokedAt,
 			newRecord.CreatedAt,
 		); err != nil {
+			if platformpg.IsForeignKeyViolation(err) {
+				return fmt.Errorf("%w: referenced user does not exist", domain.ErrValidation)
+			}
 			return fmt.Errorf("refresh_token_postgres_repo: insert rotated refresh token: %w", err)
 		}
 
@@ -131,6 +141,9 @@ func (r *RefreshTokenRepo) RevokeRefreshTokenByHash(ctx context.Context, tokenHa
 
 // RevokeRefreshTokenFamily revokes all active refresh tokens belonging to familyID (compromise mitigation on token reuse).
 func (r *RefreshTokenRepo) RevokeRefreshTokenFamily(ctx context.Context, familyID string, revokedAt time.Time) error {
+	if !id.IsValidUUID(familyID) {
+		return nil
+	}
 	const query = `
 		UPDATE refresh_tokens
 		SET revoked_at = $2
@@ -145,6 +158,9 @@ func (r *RefreshTokenRepo) RevokeRefreshTokenFamily(ctx context.Context, familyI
 
 // RevokeAllUserRefreshTokens revokes all active refresh tokens belonging to userID.
 func (r *RefreshTokenRepo) RevokeAllUserRefreshTokens(ctx context.Context, userID string, revokedAt time.Time) error {
+	if !id.IsValidUUID(userID) {
+		return nil
+	}
 	const query = `
 		UPDATE refresh_tokens
 		SET revoked_at = $2

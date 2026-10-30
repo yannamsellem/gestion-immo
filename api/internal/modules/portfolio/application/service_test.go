@@ -15,6 +15,7 @@ import (
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio/infrastructure/memory"
 	portfoliohttp "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/interfaces/http"
 	portfoliomcp "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/interfaces/mcp"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/mcpserver"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 )
@@ -261,9 +262,10 @@ func TestPortfolioHTTPAndMCPInterfaces(t *testing.T) {
 	}
 
 	// 6. Verify all 7 MCP tools are registered and callable
+	mcpUserID := id.MustNewV7()
 	reg := mcpserver.NewRegistry(func(_ context.Context, token string) (string, error) {
 		if token == "valid" {
-			return "usr_1", nil
+			return mcpUserID, nil
 		}
 		return "", errors.New("unauthorized")
 	})
@@ -295,5 +297,85 @@ func TestPortfolioHTTPAndMCPInterfaces(t *testing.T) {
 	reg.ServeHTTP(recMCP, reqMCP)
 	if recMCP.Code != http.StatusOK || !strings.Contains(recMCP.Body.String(), "SCI LES OLIVIERS") {
 		t.Fatalf("unexpected MCP response (%d): %s", recMCP.Code, recMCP.Body.String())
+	}
+}
+
+func TestPortfolio_UUIDv7IdentitiesAndBoundaryValidation(t *testing.T) {
+	svc := newTestPortfolioService()
+	ctx := context.Background()
+
+	ent, err := svc.CreateLegalEntity(ctx, application.CreateLegalEntityCmd{
+		Name:        "SCI UUIDV7",
+		EntityType:  "SCI_IR",
+		TotalShares: 100,
+	})
+	if err != nil {
+		t.Fatalf("CreateLegalEntity: %v", err)
+	}
+	if !id.IsValidUUID(ent.ID) || ent.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 LegalEntityDTO.ID, got %q", ent.ID)
+	}
+
+	sh, err := svc.UpsertShareholder(ctx, application.UpsertShareholderCmd{
+		LegalEntityID: ent.ID,
+		FullName:      "ASSOCIE UUID",
+		SharesCount:   50,
+	})
+	if err != nil {
+		t.Fatalf("UpsertShareholder: %v", err)
+	}
+	if !id.IsValidUUID(sh.ID) || sh.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 ShareholderDTO.ID, got %q", sh.ID)
+	}
+
+	prop, err := svc.CreateProperty(ctx, application.CreatePropertyCmd{
+		LegalEntityID:      ent.ID,
+		Label:              "IMMEUBLE UUID",
+		PropertyType:       "BUILDING",
+		AccountingCategory: "FIXED_ASSET",
+	})
+	if err != nil {
+		t.Fatalf("CreateProperty: %v", err)
+	}
+	if !id.IsValidUUID(prop.ID) || prop.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 PropertyDTO.ID, got %q", prop.ID)
+	}
+
+	lot, err := svc.CreateLot(ctx, application.CreateLotCmd{
+		PropertyID: prop.ID,
+		Label:      "Lot UUID",
+		LotType:    "APARTMENT",
+	})
+	if err != nil {
+		t.Fatalf("CreateLot: %v", err)
+	}
+	if !id.IsValidUUID(lot.ID) || lot.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 LotDTO.ID, got %q", lot.ID)
+	}
+
+	if _, err := svc.UpsertShareholder(ctx, application.UpsertShareholderCmd{
+		LegalEntityID: "not-a-uuid",
+		FullName:      "ASSOCIE BAD",
+		SharesCount:   10,
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed LegalEntityID in UpsertShareholder, got %v", err)
+	}
+	if _, err := svc.CreateProperty(ctx, application.CreatePropertyCmd{
+		LegalEntityID: "not-a-uuid",
+		Label:         "PROP BAD",
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed LegalEntityID in CreateProperty, got %v", err)
+	}
+	if _, err := svc.ListProperties(ctx, "not-a-uuid"); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed LegalEntityID in ListProperties, got %v", err)
+	}
+	if _, err := svc.CreateLot(ctx, application.CreateLotCmd{
+		PropertyID: "not-a-uuid",
+		Label:      "LOT BAD",
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed PropertyID in CreateLot, got %v", err)
+	}
+	if _, err := svc.GetEntityPortfolioSummary(ctx, "not-a-uuid"); !errors.Is(err, domain.ErrLegalEntityNotFound) {
+		t.Fatalf("expected ErrLegalEntityNotFound on non-UUID in GetEntityPortfolioSummary, got %v", err)
 	}
 }

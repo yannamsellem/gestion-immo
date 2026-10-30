@@ -12,6 +12,7 @@ import (
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/domain"
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/infrastructure"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/secret"
 )
 
@@ -22,7 +23,11 @@ func TestAuthSecurity_NeverLogsOrStoresPlaintextSecrets(t *testing.T) {
 	if err != nil || passHash == rawPass.Value() || strings.Contains(passHash, rawPass.Value()) {
 		t.Fatalf("password hash invalid or plaintext: err=%v", err)
 	}
-	rawRefresh := secret.New("rt_live_9876543210abcdef")
+	rawRefreshStr, err := secret.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+	rawRefresh := secret.New(rawRefreshStr)
 	if hasher.HashToken(rawRefresh) == rawRefresh.Value() {
 		t.Fatal("refresh token stored in plaintext")
 	}
@@ -40,7 +45,8 @@ func TestAuthSecurity_NeverLogsOrStoresPlaintextSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jwtTok, err := jwtSvc.GenerateAccessToken("usr_1", "yann@investissimo.fr", domain.RoleSuperAdmin)
+	userID := id.MustNewV7()
+	jwtTok, err := jwtSvc.GenerateAccessToken(userID, "yann@investissimo.fr", domain.RoleSuperAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +97,8 @@ func TestJwtService_TokenAuthorityVolumeKeysAndKIDValidation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	tok, err := jwtSvc.GenerateAccessToken("usr_42", "yann@investissimo.fr", domain.RoleSuperAdmin)
+	userID := id.MustNewV7()
+	tok, err := jwtSvc.GenerateAccessToken(userID, "yann@investissimo.fr", domain.RoleSuperAdmin)
 	if err != nil {
 		t.Fatalf("unexpected error generating token: %v", err)
 	}
@@ -100,7 +107,7 @@ func TestJwtService_TokenAuthorityVolumeKeysAndKIDValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error validating token: %v", err)
 	}
-	if claims.UserID != "usr_42" || claims.Email != "yann@investissimo.fr" || claims.Role != domain.RoleSuperAdmin {
+	if claims.UserID != userID || claims.Email != "yann@investissimo.fr" || claims.Role != domain.RoleSuperAdmin {
 		t.Fatalf("unexpected claims: %+v", claims)
 	}
 
@@ -112,7 +119,7 @@ func TestJwtService_TokenAuthorityVolumeKeysAndKIDValidation(t *testing.T) {
 	// Token signed by a different TokenAuthority (mismatched kid / public key) must fail
 	otherAuth, _ := domain.GenerateTokenAuthority("kid_other")
 	otherJwtSvc, _ := infrastructure.NewJwtService(otherAuth, "gestion-immo", 15*time.Minute)
-	otherTok, _ := otherJwtSvc.GenerateAccessToken("usr_42", "yann@investissimo.fr", domain.RoleSuperAdmin)
+	otherTok, _ := otherJwtSvc.GenerateAccessToken(userID, "yann@investissimo.fr", domain.RoleSuperAdmin)
 	if _, err := jwtSvc.ValidateAccessToken(otherTok.Value()); !errors.Is(err, domain.ErrInvalidToken) {
 		t.Fatalf("expected ErrInvalidToken on token with mismatched kid/authority, got %v", err)
 	}
