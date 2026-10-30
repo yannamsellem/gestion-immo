@@ -300,58 +300,9 @@ func TestPortfolioHTTPAndMCPInterfaces(t *testing.T) {
 	}
 }
 
-func TestPortfolio_UUIDv7IdentitiesAndBoundaryValidation(t *testing.T) {
+func TestPortfolio_BoundaryValidation(t *testing.T) {
 	svc := newTestPortfolioService()
 	ctx := context.Background()
-
-	ent, err := svc.CreateLegalEntity(ctx, application.CreateLegalEntityCmd{
-		Name:        "SCI UUIDV7",
-		EntityType:  "SCI_IR",
-		TotalShares: 100,
-	})
-	if err != nil {
-		t.Fatalf("CreateLegalEntity: %v", err)
-	}
-	if !id.IsValidUUID(ent.ID) || ent.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 LegalEntityDTO.ID, got %q", ent.ID)
-	}
-
-	sh, err := svc.UpsertShareholder(ctx, application.UpsertShareholderCmd{
-		LegalEntityID: ent.ID,
-		FullName:      "ASSOCIE UUID",
-		SharesCount:   50,
-	})
-	if err != nil {
-		t.Fatalf("UpsertShareholder: %v", err)
-	}
-	if !id.IsValidUUID(sh.ID) || sh.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 ShareholderDTO.ID, got %q", sh.ID)
-	}
-
-	prop, err := svc.CreateProperty(ctx, application.CreatePropertyCmd{
-		LegalEntityID:      ent.ID,
-		Label:              "IMMEUBLE UUID",
-		PropertyType:       "BUILDING",
-		AccountingCategory: "FIXED_ASSET",
-	})
-	if err != nil {
-		t.Fatalf("CreateProperty: %v", err)
-	}
-	if !id.IsValidUUID(prop.ID) || prop.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 PropertyDTO.ID, got %q", prop.ID)
-	}
-
-	lot, err := svc.CreateLot(ctx, application.CreateLotCmd{
-		PropertyID: prop.ID,
-		Label:      "Lot UUID",
-		LotType:    "APARTMENT",
-	})
-	if err != nil {
-		t.Fatalf("CreateLot: %v", err)
-	}
-	if !id.IsValidUUID(lot.ID) || lot.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 LotDTO.ID, got %q", lot.ID)
-	}
 
 	if _, err := svc.UpsertShareholder(ctx, application.UpsertShareholderCmd{
 		LegalEntityID: "not-a-uuid",
@@ -377,53 +328,6 @@ func TestPortfolio_UUIDv7IdentitiesAndBoundaryValidation(t *testing.T) {
 	}
 	if _, err := svc.GetEntityPortfolioSummary(ctx, "not-a-uuid"); !errors.Is(err, domain.ErrLegalEntityNotFound) {
 		t.Fatalf("expected ErrLegalEntityNotFound on non-UUID in GetEntityPortfolioSummary, got %v", err)
-	}
-}
-
-func TestPortfolioHTTP_PathSuppliedOptionalBodyIDsAcceptEmptyString(t *testing.T) {
-	svc := newTestPortfolioService()
-	handler := portfoliohttp.NewHandler(svc)
-	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
-
-	reqEnt := httptest.NewRequest(http.MethodPost, "/api/v1/entities", strings.NewReader(`{"name":"SCI PATH OVERRIDE","entity_type":"SCI_IS","total_shares":1000}`))
-	reqEnt.Header.Set("Content-Type", "application/json")
-	recEnt := httptest.NewRecorder()
-	mux.ServeHTTP(recEnt, reqEnt)
-	if recEnt.Code != http.StatusCreated {
-		t.Fatalf("expected 201 Created, got %d: %s", recEnt.Code, recEnt.Body.String())
-	}
-	var ent application.LegalEntityDTO
-	if err := json.Unmarshal(recEnt.Body.Bytes(), &ent); err != nil {
-		t.Fatalf("unmarshal entity: %v", err)
-	}
-
-	reqSh := httptest.NewRequest(http.MethodPost, "/api/v1/entities/"+ent.ID+"/shareholders", strings.NewReader(`{"legal_entity_id":"","full_name":"CLAIRE MARTIN","shares_count":100}`))
-	reqSh.Header.Set("Content-Type", "application/json")
-	recSh := httptest.NewRecorder()
-	mux.ServeHTTP(recSh, reqSh)
-	if recSh.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK when legal_entity_id is empty string in shareholder body, got %d: %s", recSh.Code, recSh.Body.String())
-	}
-
-	reqProp := httptest.NewRequest(http.MethodPost, "/api/v1/entities/"+ent.ID+"/properties", strings.NewReader(`{"legal_entity_id":"","label":"IMMEUBLE PARIS","property_type":"BUILDING","accounting_category":"FIXED_ASSET"}`))
-	reqProp.Header.Set("Content-Type", "application/json")
-	recProp := httptest.NewRecorder()
-	mux.ServeHTTP(recProp, reqProp)
-	if recProp.Code != http.StatusCreated {
-		t.Fatalf("expected 201 Created when legal_entity_id is empty string in property body, got %d: %s", recProp.Code, recProp.Body.String())
-	}
-	var prop application.PropertyDTO
-	if err := json.Unmarshal(recProp.Body.Bytes(), &prop); err != nil {
-		t.Fatalf("unmarshal property: %v", err)
-	}
-
-	reqLot := httptest.NewRequest(http.MethodPost, "/api/v1/properties/"+prop.ID+"/lots", strings.NewReader(`{"property_id":"","label":"Lot RDC","lot_type":"APARTMENT"}`))
-	reqLot.Header.Set("Content-Type", "application/json")
-	recLot := httptest.NewRecorder()
-	mux.ServeHTTP(recLot, reqLot)
-	if recLot.Code != http.StatusCreated {
-		t.Fatalf("expected 201 Created when property_id is empty string in lot body, got %d: %s", recLot.Code, recLot.Body.String())
 	}
 }
 

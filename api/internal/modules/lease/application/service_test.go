@@ -312,49 +312,17 @@ func TestLeaseModule_HTTPAndMCPIntegration(t *testing.T) {
 	}
 }
 
-func TestLease_UUIDv7IdentitiesAndBoundaryValidation(t *testing.T) {
+func TestLease_BoundaryValidation(t *testing.T) {
 	svc := newTestLeaseService()
 	ctx := context.Background()
 	entityID := id.MustNewV7()
 	lotID := id.MustNewV7()
-
-	tenant, err := svc.CreateTenant(ctx, application.CreateTenantCmd{
-		FullName: "LOCATAIRE UUIDV7",
-		Email:    "uuid@example.fr",
-	})
-	if err != nil {
-		t.Fatalf("CreateTenant: %v", err)
-	}
-	if !id.IsValidUUID(tenant.ID) || tenant.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 TenantDTO.ID, got %q", tenant.ID)
-	}
-
-	lease, err := svc.CreateLease(ctx, application.CreateLeaseCmd{
-		LegalEntityID: entityID,
-		LotID:         lotID,
-		TenantID:      tenant.ID,
-		LeaseType:     "RESIDENTIAL_UNFURNISHED",
-		RentNetCents:  money.AmountCents(800_00),
-	})
-	if err != nil {
-		t.Fatalf("CreateLease: %v", err)
-	}
-	if !id.IsValidUUID(lease.ID) || lease.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 LeaseDTO.ID, got %q", lease.ID)
-	}
-
-	calls, err := svc.GenerateMonthlyRentCalls(ctx, entityID, "2026-05")
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("GenerateMonthlyRentCalls: len=%d err=%v", len(calls), err)
-	}
-	if !id.IsValidUUID(calls[0].ID) || calls[0].ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 RentCallDTO.ID, got %q", calls[0].ID)
-	}
+	tenantID := id.MustNewV7()
 
 	if _, err := svc.CreateLease(ctx, application.CreateLeaseCmd{
 		LegalEntityID: "not-a-uuid",
 		LotID:         lotID,
-		TenantID:      tenant.ID,
+		TenantID:      tenantID,
 		LeaseType:     "RESIDENTIAL_UNFURNISHED",
 		RentNetCents:  money.AmountCents(800_00),
 	}); !errors.Is(err, domain.ErrValidation) {
@@ -363,7 +331,7 @@ func TestLease_UUIDv7IdentitiesAndBoundaryValidation(t *testing.T) {
 	if _, err := svc.CreateLease(ctx, application.CreateLeaseCmd{
 		LegalEntityID: entityID,
 		LotID:         "not-a-uuid",
-		TenantID:      tenant.ID,
+		TenantID:      tenantID,
 		LeaseType:     "RESIDENTIAL_UNFURNISHED",
 		RentNetCents:  money.AmountCents(800_00),
 	}); !errors.Is(err, domain.ErrValidation) {

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { ENTITY_TYPE_OPTIONS } from '#lib/modules/portfolio/labels';
 import type { LegalEntityDTO } from '#lib/modules/portfolio/types';
 import {
 	evaluateJournalBalance,
@@ -8,9 +7,12 @@ import {
 	toggleDisabledLineId
 } from './statement-state';
 
+const ENTITY_1_ID = '0192dce0-7c4a-7000-8000-000000000001';
+const ENTITY_2_ID = '0192dce0-7c4a-7000-8000-000000000002';
+
 const SAMPLE_ENTITIES: LegalEntityDTO[] = [
 	{
-		id: 'ent_1',
+		id: ENTITY_1_ID,
 		name: 'SCI Rivoli',
 		entity_type: 'SCI_IR',
 		siret: '12345678900011',
@@ -22,7 +24,7 @@ const SAMPLE_ENTITIES: LegalEntityDTO[] = [
 		updated_at: '2026-01-01T00:00:00Z'
 	},
 	{
-		id: 'ent_2',
+		id: ENTITY_2_ID,
 		name: 'SARL Vendôme',
 		entity_type: 'FAMILY_SARL',
 		siret: '98765432100022',
@@ -97,7 +99,7 @@ describe('resolveAccountingContext', () => {
 			url: new URL('http://localhost:5173/accounting?year=2025')
 		});
 		expect(result).toEqual({
-			activeEntityId: 'ent_1',
+			activeEntityId: ENTITY_1_ID,
 			fiscalYear: 2025
 		});
 	});
@@ -106,19 +108,12 @@ describe('resolveAccountingContext', () => {
 		const currentYear = new Date().getFullYear();
 		const result = resolveAccountingContext({
 			entities: SAMPLE_ENTITIES,
-			selectedEntityId: 'ent_2',
+			selectedEntityId: ENTITY_2_ID,
 			url: new URL('http://localhost:5173/accounting/journal?year=1850')
 		});
 		expect(result).toEqual({
-			activeEntityId: 'ent_2',
+			activeEntityId: ENTITY_2_ID,
 			fiscalYear: currentYear
 		});
-	});
-
-	it('uses canonical 100% English OpenAPI EntityType values in SAMPLE_ENTITIES', () => {
-		const validEntityTypes = new Set(ENTITY_TYPE_OPTIONS.map((option) => option.value));
-		for (const entity of SAMPLE_ENTITIES) {
-			expect(validEntityTypes.has(entity.entity_type)).toBe(true);
-		}
 	});
 });

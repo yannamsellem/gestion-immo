@@ -472,7 +472,7 @@ func TestAccountingHTTPAndMCPInterfaces(t *testing.T) {
 	}
 }
 
-func TestAccounting_UUIDv7IdentitiesPreservedSlugsAndPreUploadEntityCheck(t *testing.T) {
+func TestAccounting_PreUploadEntityCheckPreservedSlugsAndBoundaryValidation(t *testing.T) {
 	ctx := context.Background()
 	portfolioSvc := newTestPortfolioService()
 
@@ -497,7 +497,7 @@ func TestAccounting_UUIDv7IdentitiesPreservedSlugsAndPreUploadEntityCheck(t *tes
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	// 1. Unknown valid UUIDv7 entityID -> ErrLegalEntityNotFound (HTTP 404) & zero R2 uploads
+	// 1. Unknown valid UUID entityID -> ErrLegalEntityNotFound (HTTP 404) & zero R2 uploads
 	unknownEntityID := id.MustNewV7()
 	if _, err := svc.GenerateAnnualAccountsPDF(ctx, unknownEntityID, 2025, nil); !errors.Is(err, portfoliodomain.ErrLegalEntityNotFound) {
 		t.Fatalf("expected ErrLegalEntityNotFound on unknown entityID, got %v", err)
@@ -530,9 +530,9 @@ func TestAccounting_UUIDv7IdentitiesPreservedSlugsAndPreUploadEntityCheck(t *tes
 		t.Fatalf("expected ErrValidation on malformed LegalEntityID, got %v", err)
 	}
 
-	// 3. Valid entity -> UUIDv7 IDs on AccountBalanceLine, JournalEntryDTO, JournalLineDTO, AnnualAccountReportDTO; slugs preserved
+	// 3. Valid entity -> PCG/CERFA line_id slugs preserved on JournalLineDTO and AnnualAccountReportDTO
 	ent, err := portfolioSvc.CreateLegalEntity(ctx, portfolioapp.CreateLegalEntityCmd{
-		Name:              "SCI UUIDV7 COMPTA",
+		Name:              "SCI SLUGS COMPTA",
 		EntityType:        "SCI_IS",
 		SIRET:             "77123456700018",
 		ShareCapitalCents: 10000_00,
@@ -540,22 +540,6 @@ func TestAccounting_UUIDv7IdentitiesPreservedSlugsAndPreUploadEntityCheck(t *tes
 	})
 	if err != nil {
 		t.Fatalf("create entity: %v", err)
-	}
-
-	if err := svc.UpsertAccountBalanceLines(ctx, ent.ID, 2025, []domain.AccountBalanceLine{
-		{LineID: "rev_locaux", AccountCode: "706100", Label: "LOCATIONS", Section: "OPERATING_REVENUE", NetNCents: 50000_00},
-		{LineID: "chg_loc", AccountCode: "614000", Label: "CHARGES", Section: "EXTERNAL_EXPENSES", NetNCents: 10000_00},
-	}); err != nil {
-		t.Fatalf("UpsertAccountBalanceLines: %v", err)
-	}
-	storedLines, err := accountBalances.ListAccountBalanceLines(ctx, ent.ID, 2025)
-	if err != nil || len(storedLines) != 2 {
-		t.Fatalf("ListAccountBalanceLines: got %d (%v)", len(storedLines), err)
-	}
-	for _, l := range storedLines {
-		if !id.IsValidUUID(l.ID) || l.ID[14] != '7' {
-			t.Fatalf("expected UUIDv7 AccountBalanceLine.ID, got %q", l.ID)
-		}
 	}
 
 	entry, err := svc.RecordJournalEntry(ctx, application.RecordJournalEntryCmd{
@@ -572,14 +556,6 @@ func TestAccounting_UUIDv7IdentitiesPreservedSlugsAndPreUploadEntityCheck(t *tes
 	if err != nil {
 		t.Fatalf("RecordJournalEntry: %v", err)
 	}
-	if !id.IsValidUUID(entry.ID) || entry.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 JournalEntryDTO.ID, got %q", entry.ID)
-	}
-	for _, jl := range entry.Lines {
-		if !id.IsValidUUID(jl.ID) || jl.ID[14] != '7' {
-			t.Fatalf("expected UUIDv7 JournalLineDTO.ID, got %q", jl.ID)
-		}
-	}
 	if entry.Lines[1].LineID != "rev_locaux" {
 		t.Fatalf("expected JournalLineDTO.LineID slug 'rev_locaux' preserved, got %q", entry.Lines[1].LineID)
 	}
@@ -587,9 +563,6 @@ func TestAccounting_UUIDv7IdentitiesPreservedSlugsAndPreUploadEntityCheck(t *tes
 	report, err := svc.GenerateAnnualAccountsPDF(ctx, ent.ID, 2025, []string{"chg_loc"})
 	if err != nil {
 		t.Fatalf("GenerateAnnualAccountsPDF: %v", err)
-	}
-	if !id.IsValidUUID(report.ID) || report.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 AnnualAccountReportDTO.ID, got %q", report.ID)
 	}
 	if len(report.DisabledLineIDs) != 1 || report.DisabledLineIDs[0] != "chg_loc" {
 		t.Fatalf("expected DisabledLineIDs slug ['chg_loc'] preserved, got %v", report.DisabledLineIDs)

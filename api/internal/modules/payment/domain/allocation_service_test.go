@@ -2,27 +2,12 @@
 package domain_test
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	leaseapp "github.com/yannamsellem/gestion-immo/internal/modules/lease/application"
 	leasedomain "github.com/yannamsellem/gestion-immo/internal/modules/lease/domain"
-	leasememory "github.com/yannamsellem/gestion-immo/internal/modules/lease/infrastructure/memory"
-	paymentapp "github.com/yannamsellem/gestion-immo/internal/modules/payment/application"
 	"github.com/yannamsellem/gestion-immo/internal/modules/payment/domain"
-	paymentinfra "github.com/yannamsellem/gestion-immo/internal/modules/payment/infrastructure"
-	paymentmemory "github.com/yannamsellem/gestion-immo/internal/modules/payment/infrastructure/memory"
-	paymenthttp "github.com/yannamsellem/gestion-immo/internal/modules/payment/interfaces/http"
-	paymentmcp "github.com/yannamsellem/gestion-immo/internal/modules/payment/interfaces/mcp"
 	"github.com/yannamsellem/gestion-immo/internal/platform/id"
-	"github.com/yannamsellem/gestion-immo/internal/platform/mcpserver"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 )
 
@@ -99,118 +84,4 @@ func TestDetectTargetMonth_FrenchAccentsAndSlashFormat(t *testing.T) {
 			t.Fatalf("DetectTargetMonth(%q, %d) = (%q, %v), want (%q, %v)", tc.label, tc.fallbackYear, got, ok, tc.wantMonth, tc.wantOK)
 		}
 	}
-}
-
-func TestPaymentModule_CashJournalCSVImportAndNegativePositions(t *testing.T) {
-	ctx := context.Background()
-	tenantRepo := leasememory.NewTenantRepo()
-	leaseRepo := leasememory.NewLeaseRepo()
-	rentCallRepo := leasememory.NewRentCallRepo()
-	leaseUoW := leasememory.NewUnitOfWork(tenantRepo, leaseRepo, rentCallRepo)
-	leaseSvc := leaseapp.NewService(tenantRepo, leaseRepo, rentCallRepo, leaseUoW)
-
-	tenant, err := leaseSvc.CreateTenant(ctx, leaseapp.CreateTenantCmd{
-		FullName: "Jean Dupont",
-		Email:    "jean.dupont@example.fr",
-	})
-	if err != nil {
-		t.Fatalf("create tenant: %v", err)
-	}
-
-	entityID := id.MustNewV7()
-	lotID := id.MustNewV7()
-	lse, err := leaseSvc.CreateLease(ctx, leaseapp.CreateLeaseCmd{
-		LegalEntityID:   entityID,
-		LotID:           lotID,
-		TenantID:        tenant.ID,
-		LeaseType:       "RESIDENTIAL_UNFURNISHED",
-		RentNetCents:    750_00,
-		ChargesCents:    50_00,
-		DueDayOfMonth:   5,
-		GLIPolicyNumber: "GLI-2026-9988",
-	})
-	if err != nil {
-		t.Fatalf("create lease: %v", err)
-	}
-
-	for _, period := range []string{"2026-01", "2026-02", "2026-03"} {
-		if _, err := leaseSvc.GenerateMonthlyRentCalls(ctx, entityID, period); err != nil {
-			t.Fatalf("generate rent calls %s: %v", period, err)
-		}
-	}
-
-	paymentRepo := paymentmemory.NewPaymentRepo()
-	cashJournalRepo := paymentmemory.NewCashJournalRepo()
-	paymentUoW := paymentmemory.NewUnitOfWork(paymentRepo, cashJournalRepo)
-	bankProvider := paymentinfra.NewDSP2Provider(false, "dsp2")
-	csvImporter := paymentinfra.NewCSVImporter()
-	svc := paymentapp.NewService(paymentRepo, cashJournalRepo, paymentUoW, leaseSvc, bankProvider, csvImporter)
-	handler := paymenthttp.NewHandler(svc)
-
-	// Verify DSP2 disabled by default
-	if _, err := svc.SyncOpenBankingDSP2(ctx, entityID, time.Now()); !errors.Is(err, domain.ErrOpenBankingDisabled) {
-		t.Fatalf("expected ErrOpenBankingDisabled, got %v", err)
-	}
-
-	// Record a cash payment for March explicitly -> posts to PCG 530 Cash Journal
-	cashReceipt, err := svc.RecordCashPayment(ctx, paymentapp.RecordCashPaymentCmd{
-		LeaseID:     lse.ID,
-		AmountCents: 800_00,
-		Label:       "Espèces loyer mars 2026",
-		PaymentDate: "2026-03-10",
-	})
-	if err != nil {
-		t.Fatalf("record cash payment: %v", err)
-	}
-	if cashReceipt.Method != domain.MethodCash || len(cashReceipt.Allocations) != 1 || cashReceipt.Allocations[0].PeriodMonth != "2026-03" {
-		t.Fatalf("unexpected cash receipt allocations: %+v", cashReceipt)
-	}
-
-	journal, err := svc.ListCashJournalByEntity(ctx, entityID)
-	if err != nil || len(journal) != 1 {
-		t.Fatalf("expected 1 cash journal entry, got %d (%v)", len(journal), err)
-	}
-	if journal[0].AccountCode != "530" || journal[0].DebitCents != 800_00 {
-		t.Fatalf("expected 530 debit 800_00, got %+v", journal[0])
-	}
-
-	// Check negative positions: Jan & Feb (1600 EUR) should still be unpaid and GLI eligible
-	negPositions, err := svc.ListNegativePositions(ctx, entityID)
-	if err != nil || len(negPositions) != 1 {
-		t.Fatalf("expected 1 negative position, got %+v (%v)", negPositions, err)
-	}
-	if negPositions[0].TotalUnpaidCents != 1600_00 || !negPositions[0].GLIEligible || len(negPositions[0].UnpaidMonths) != 2 {
-		t.Fatalf("unexpected negative position details: %+v", negPositions[0])
-	}
-
-	// Import CSV batch paying 600.00 EUR using decimal EUR column (no month -> FIFO allocates to 2026-01)
-	csvData := "lease_id;amount;label;payment_date\n" + lse.ID + ";600,00;VIR SEPA JEAN DUPONT;2026-03-18\n"
-	batchRes, err := svc.ImportPaymentsCSV(ctx, entityID, strings.NewReader(csvData))
-	if err != nil {
-		t.Fatalf("import csv: %v", err)
-	}
-	if batchRes.ImportedCount != 1 || batchRes.TotalImportedCents != 600_00 {
-		t.Fatalf("unexpected batch result: %+v", batchRes)
-	}
-
-	// Verify HTTP & MCP routes
-	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID+"/negative-positions", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK from negative-positions endpoint, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var httpNeg []paymentapp.NegativePositionDTO
-	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&httpNeg); err != nil {
-		t.Fatalf("decode negative positions response: %v", err)
-	}
-	if len(httpNeg) != 1 || httpNeg[0].TotalUnpaidCents != 1000_00 {
-		t.Fatalf("expected 1000_00 remaining unpaid after CSV import, got %+v", httpNeg)
-	}
-
-	reg := mcpserver.NewRegistry(nil)
-	paymentmcp.RegisterTools(reg, svc)
 }

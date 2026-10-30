@@ -119,11 +119,6 @@ func NewRegistry(validator TokenValidatorFunc) *Registry {
 	return reg
 }
 
-// Server returns the underlying *mcp.Server instance.
-func (reg *Registry) Server() *mcp.Server {
-	return reg.mcpServer
-}
-
 // ProtectedResourceMetadataHandler returns the RFC 9728 OAuth 2.0 protected resource metadata handler.
 func (reg *Registry) ProtectedResourceMetadataHandler() http.Handler {
 	return reg.metadataHandler

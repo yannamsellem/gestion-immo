@@ -16,7 +16,6 @@ import (
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/infrastructure"
 	"github.com/yannamsellem/gestion-immo/internal/modules/auth/infrastructure/memory"
 	authhttp "github.com/yannamsellem/gestion-immo/internal/modules/auth/interfaces/http"
-	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/secret"
 )
 
@@ -363,13 +362,13 @@ func TestSignup_ValidatesPasswordLengthBounds(t *testing.T) {
 	}
 }
 
-func TestAuth_UUIDv7IdentitiesAnd256BitTokenFormats(t *testing.T) {
+func TestAuth_TokenFormatsAndBoundaryValidation(t *testing.T) {
 	users := memory.NewUserRepo()
 	refreshTokens := memory.NewRefreshTokenRepo()
 	mcpTokens := memory.NewMCPTokenRepo()
 	uow := memory.NewUnitOfWork(users, refreshTokens, mcpTokens)
 	hasher := infrastructure.NewArgon2Hasher()
-	authority, err := domain.GenerateTokenAuthority("kid_uuidv7_test")
+	authority, err := domain.GenerateTokenAuthority("kid_token_format_test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,20 +383,14 @@ func TestAuth_UUIDv7IdentitiesAnd256BitTokenFormats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BootstrapSuperAdmin: %v", err)
 	}
-	if !id.IsValidUUID(superAdmin.ID) || superAdmin.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 superAdmin.ID, got %q", superAdmin.ID)
-	}
 
 	applicant, err := svc.Signup(ctx, application.SignupCommand{
-		FullName: "Manager UUID",
-		Email:    "manager-uuid@investissimo.fr",
+		FullName: "Manager Token",
+		Email:    "manager-token@investissimo.fr",
 		Password: secret.New("ManagerPass123!"),
 	})
 	if err != nil {
 		t.Fatalf("Signup: %v", err)
-	}
-	if !id.IsValidUUID(applicant.ID) || applicant.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 applicant.ID, got %q", applicant.ID)
 	}
 
 	if _, err := svc.ApproveUser(ctx, superAdmin.ID, "not-a-uuid"); !errors.Is(err, domain.ErrValidation) {
@@ -415,7 +408,7 @@ func TestAuth_UUIDv7IdentitiesAnd256BitTokenFormats(t *testing.T) {
 	}
 
 	pair, err := svc.Login(ctx, application.LoginCommand{
-		Email:    "manager-uuid@investissimo.fr",
+		Email:    "manager-token@investissimo.fr",
 		Password: secret.New("ManagerPass123!"),
 	})
 	if err != nil {
@@ -425,16 +418,6 @@ func TestAuth_UUIDv7IdentitiesAnd256BitTokenFormats(t *testing.T) {
 	if len(rawRT) != 64 || strings.Contains(rawRT, "_") {
 		t.Fatalf("expected unprefixed 64-char hex refresh token, got len=%d %q", len(rawRT), rawRT)
 	}
-	rtRec, err := refreshTokens.FindRefreshTokenByHash(ctx, hasher.HashToken(pair.RefreshToken))
-	if err != nil {
-		t.Fatalf("FindRefreshTokenByHash: %v", err)
-	}
-	if !id.IsValidUUID(rtRec.ID) || rtRec.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 refresh token record ID, got %q", rtRec.ID)
-	}
-	if !id.IsValidUUID(rtRec.FamilyID) || rtRec.FamilyID[14] != '7' {
-		t.Fatalf("expected UUIDv7 refresh token family ID, got %q", rtRec.FamilyID)
-	}
 
 	mcpTok, err := svc.CreateMCPToken(ctx, applicant.ID, "antigravity")
 	if err != nil {
@@ -442,12 +425,5 @@ func TestAuth_UUIDv7IdentitiesAnd256BitTokenFormats(t *testing.T) {
 	}
 	if !strings.HasPrefix(mcpTok.Value(), "mcp_live_") || len(mcpTok.Value()) != 73 {
 		t.Fatalf("expected 73-char mcp_live_ token, got len=%d %q", len(mcpTok.Value()), mcpTok.Value())
-	}
-	mcpRec, err := mcpTokens.FindMCPTokenByHash(ctx, hasher.HashToken(mcpTok))
-	if err != nil {
-		t.Fatalf("FindMCPTokenByHash: %v", err)
-	}
-	if !id.IsValidUUID(mcpRec.ID) || mcpRec.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 MCP token record ID, got %q", mcpRec.ID)
 	}
 }

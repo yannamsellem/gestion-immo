@@ -8,27 +8,20 @@ import (
 )
 
 func TestIsValidUUID_StrictCanonical36Char(t *testing.T) {
-	sample, err := id.NewV7()
-	if err != nil {
-		t.Fatalf("NewV7 failed: %v", err)
-	}
-	mustSample := id.MustNewV7()
-	if !id.IsValidUUID(mustSample) {
-		t.Fatalf("MustNewV7 produced invalid UUID %q", mustSample)
-	}
-	noHyphens := strings.ReplaceAll(sample, "-", "")
+	const canonical = "0192dce0-7c4a-7000-8000-000000000001"
+	noHyphens := strings.ReplaceAll(canonical, "-", "")
 	cases := []struct {
 		in   string
 		want bool
 	}{
-		{sample, true},
-		{strings.ToUpper(sample), true},
+		{canonical, true},
+		{strings.ToUpper(canonical), true},
 		{"", false},
 		{"ent_0123456789abcdef0123456789abcdef", false},
-		{"urn:uuid:" + sample, false},
-		{"{" + sample + "}", false},
+		{"urn:uuid:" + canonical, false},
+		{"{" + canonical + "}", false},
 		{noHyphens, false},
-		{" " + sample, false},
+		{" " + canonical, false},
 	}
 	for _, tc := range cases {
 		if got := id.IsValidUUID(tc.in); got != tc.want {

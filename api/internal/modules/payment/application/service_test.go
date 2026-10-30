@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	accountingapp "github.com/yannamsellem/gestion-immo/internal/modules/accounting/application"
 	accountinginfra "github.com/yannamsellem/gestion-immo/internal/modules/accounting/infrastructure"
@@ -460,12 +461,16 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 	}
 }
 
-func TestPayment_UUIDv7IdentitiesCashReceiptFormatAndValidation(t *testing.T) {
+func TestPayment_AutoCashReceiptFormatDSP2DisabledAndBoundaryValidation(t *testing.T) {
 	paymentSvc, leaseSvc := newTestPaymentSuite()
 	ctx := context.Background()
 	entityID := id.MustNewV7()
 
-	lse := seedTestLeaseWithRentCalls(t, leaseSvc, entityID, "2026-01")
+	if _, err := paymentSvc.SyncOpenBankingDSP2(ctx, entityID, time.Now()); !errors.Is(err, domain.ErrOpenBankingDisabled) {
+		t.Fatalf("expected ErrOpenBankingDisabled when DSP2 is disabled, got %v", err)
+	}
+
+	lse := seedTestLeaseWithRentCalls(t, leaseSvc, entityID, "2026-01", "2026-02")
 
 	receipt, err := paymentSvc.RecordCashPayment(ctx, application.RecordCashPaymentCmd{
 		LeaseID:     lse.ID,
@@ -476,31 +481,16 @@ func TestPayment_UUIDv7IdentitiesCashReceiptFormatAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecordCashPayment: %v", err)
 	}
-	if !id.IsValidUUID(receipt.ID) || receipt.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 PaymentReceiptDTO.ID, got %q", receipt.ID)
-	}
-	if !id.IsValidUUID(receipt.CashJournalEntryID) || receipt.CashJournalEntryID[14] != '7' {
-		t.Fatalf("expected UUIDv7 CashJournalEntryID, got %q", receipt.CashJournalEntryID)
-	}
-	if len(receipt.Allocations) != 1 || !id.IsValidUUID(receipt.Allocations[0].ID) || receipt.Allocations[0].ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 RentAllocation.ID, got %+v", receipt.Allocations)
-	}
 	receiptPattern := regexp.MustCompile(`^CAISSE-\d{8}-[0-9A-F]{6}$`)
 	if !receiptPattern.MatchString(receipt.ReceiptNumber) {
 		t.Fatalf("expected auto-generated cash ReceiptNumber matching ^CAISSE-\\d{8}-[0-9A-F]{6}$, got %q", receipt.ReceiptNumber)
 	}
 
-	deposit, err := paymentSvc.RecordCashDepositToBank(ctx, application.RecordCashDepositCmd{
-		LegalEntityID: entityID,
-		AmountCents:   money.AmountCents(800_00),
-		Label:         "Remise espèces",
-		EntryDate:     "2026-01-06",
-	})
-	if err != nil {
-		t.Fatalf("RecordCashDepositToBank: %v", err)
-	}
-	if !id.IsValidUUID(deposit.ID) || deposit.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 CashJournalEntryDTO.ID, got %q", deposit.ID)
+	// Semicolon CSV with French comma decimal EUR column ("600,00")
+	semicolonCSV := "lease_id;amount;label;payment_date\n" + lse.ID + ";600,00;VIR SEPA FEVRIER;2026-02-05\n"
+	csvRes, err := paymentSvc.ImportPaymentsCSV(ctx, entityID, strings.NewReader(semicolonCSV))
+	if err != nil || csvRes.ImportedCount != 1 || csvRes.TotalImportedCents != money.AmountCents(600_00) {
+		t.Fatalf("expected semicolon comma-decimal CSV import of 600_00 cents, got %+v (err=%v)", csvRes, err)
 	}
 
 	if _, err := paymentSvc.RecordCashPayment(ctx, application.RecordCashPaymentCmd{

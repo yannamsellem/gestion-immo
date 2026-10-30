@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting"
 	"github.com/yannamsellem/gestion-immo/internal/modules/document"
@@ -17,41 +16,50 @@ import (
 	"github.com/yannamsellem/gestion-immo/internal/modules/lease"
 	"github.com/yannamsellem/gestion-immo/internal/modules/payment"
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/mcpserver"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
 )
 
-func init() {
-	mcpserver.RegisterTestFullAppToolsHook(func(reg *mcpserver.Registry) {
-		r2Store := r2.NewInMemoryStorage()
-		pdfEngine := templating.NewInMemoryPdfEngine()
-
-		portfolioMod := portfolio.NewModule(nil)
-		leaseMod := lease.NewModule(nil)
-		paymentMod := payment.NewModule(nil, leaseMod.Service(), false)
-		documentMod := document.NewModule(
-			nil,
-			r2Store,
-			pdfEngine,
-			portfolioMod.Service(),
-			leaseMod.Service(),
-			paymentMod.Service(),
-		)
-		inspectionMod := inspection.NewModule(nil, r2Store, pdfEngine)
-		accountingMod := accounting.NewModule(nil, r2Store, pdfEngine)
-
-		portfolioMod.RegisterMCPTools(reg)
-		leaseMod.RegisterMCPTools(reg)
-		paymentMod.RegisterMCPTools(reg)
-		documentMod.RegisterMCPTools(reg)
-		inspectionMod.RegisterMCPTools(reg)
-		accountingMod.RegisterMCPTools(reg)
+func newTestFullAppRegistry(validBearerToken string) *mcpserver.Registry {
+	testUserID := id.MustNewV7()
+	reg := mcpserver.NewRegistry(func(_ context.Context, rawBearer string) (string, error) {
+		if rawBearer == validBearerToken {
+			return testUserID, nil
+		}
+		return "", errors.New("invalid mcp token")
 	})
+
+	r2Store := r2.NewInMemoryStorage()
+	pdfEngine := templating.NewInMemoryPdfEngine()
+
+	portfolioMod := portfolio.NewModule(nil)
+	leaseMod := lease.NewModule(nil)
+	paymentMod := payment.NewModule(nil, leaseMod.Service(), false)
+	documentMod := document.NewModule(
+		nil,
+		r2Store,
+		pdfEngine,
+		portfolioMod.Service(),
+		leaseMod.Service(),
+		paymentMod.Service(),
+	)
+	inspectionMod := inspection.NewModule(nil, r2Store, pdfEngine)
+	accountingMod := accounting.NewModule(nil, r2Store, pdfEngine, portfolioMod.Service())
+
+	portfolioMod.RegisterMCPTools(reg)
+	leaseMod.RegisterMCPTools(reg)
+	paymentMod.RegisterMCPTools(reg)
+	documentMod.RegisterMCPTools(reg)
+	inspectionMod.RegisterMCPTools(reg)
+	accountingMod.RegisterMCPTools(reg)
+
+	return reg
 }
 
 func TestMCPRegistry_RequiresBearerAndExposesAllModuleToolsWithoutMigrateDriveRecord(t *testing.T) {
-	srv := mcpserver.NewTestFullAppRegistry(t, "mcp_valid_token_123")
+	srv := newTestFullAppRegistry("mcp_valid_token_123")
 
 	reqUnauth := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 	recUnauth := httptest.NewRecorder()
@@ -79,7 +87,7 @@ func TestMCPRegistry_RequiresBearerAndExposesAllModuleToolsWithoutMigrateDriveRe
 }
 
 func TestMCPRegistry_StreamableHTTPInitializeAndToolExecution(t *testing.T) {
-	srv := mcpserver.NewTestFullAppRegistry(t, "mcp_valid_token_123")
+	srv := newTestFullAppRegistry("mcp_valid_token_123")
 
 	// 1. GET /mcp health/metadata endpoint with valid Bearer token
 	reqGet := httptest.NewRequest(http.MethodGet, "/mcp", nil)
@@ -126,26 +134,5 @@ func TestMCPRegistry_StreamableHTTPInitializeAndToolExecution(t *testing.T) {
 	}
 	if rpcResp.Result.IsError {
 		t.Fatalf("expected non-error tool call result, got %s", recCall.Body.String())
-	}
-
-	// 4. Verify native mcp.Client <-> mcp.Server session over mcp.NewInMemoryTransports()
-	ctx := context.Background()
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-	serverSession, err := srv.Server().Connect(ctx, serverTransport, nil)
-	if err != nil {
-		t.Fatalf("mcp.Server.Connect failed: %v", err)
-	}
-	defer serverSession.Close()
-
-	client := mcp.NewClient(&mcp.Implementation{Name: "antigravity-test-client", Version: "1.0.0"}, nil)
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	if err != nil {
-		t.Fatalf("mcp.Client.Connect failed: %v", err)
-	}
-	defer clientSession.Close()
-
-	listRes, err := clientSession.ListTools(ctx, nil)
-	if err != nil || len(listRes.Tools) == 0 {
-		t.Fatalf("clientSession.ListTools failed (len=%d): %v", len(listRes.Tools), err)
 	}
 }

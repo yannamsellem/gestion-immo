@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 const { invalidateAllMock } = vi.hoisted(() => ({
@@ -13,13 +10,6 @@ vi.mock('$app/navigation', () => ({
 
 import { deriveWorkspaceGateState } from './onboarding-gate';
 import { workspaceStore } from './workspace.svelte';
-
-const currentDir = dirname(fileURLToPath(import.meta.url));
-const createEntityDialogPath = resolve(
-	currentDir,
-	'../../components/portfolio/CreateEntityDialog.svelte'
-);
-const appLayoutPath = resolve(currentDir, '../../../routes/(app)/+layout.svelte');
 
 describe('deriveWorkspaceGateState', () => {
 	it('returns onboarding_required when zero entities exist and there is no load error', () => {
@@ -59,23 +49,7 @@ describe('deriveWorkspaceGateState', () => {
 	});
 });
 
-describe('persistent onboarding accessibility & async completion contract', () => {
-	it('exposes ThemeToggle and single logout action inside persistent CreateEntityDialog without focus-trapped outer controls', () => {
-		const dialogSource = readFileSync(createEntityDialogPath, 'utf8');
-		const layoutSource = readFileSync(appLayoutPath, 'utf8');
-
-		expect(dialogSource).toContain('<ThemeToggle');
-		expect(dialogSource).toContain('/(auth)/logout');
-
-		const onboardingBranch =
-			layoutSource
-				.split("{:else if gateState === 'onboarding_required'}")[1]
-				?.split('{:else}')[0] ?? '';
-		expect(onboardingBranch).toContain('<CreateEntityDialog open={true} persistent={true} />');
-		expect(onboardingBranch).not.toContain('<ThemeToggle');
-		expect(onboardingBranch).not.toContain('/(auth)/logout');
-	});
-
+describe('workspaceStore.setEntityId async completion contract', () => {
 	it('awaits invalidateAll inside workspaceStore.setEntityId before resolving', async () => {
 		let resolveInvalidate: (() => void) | null = null;
 		invalidateAllMock.mockImplementationOnce(

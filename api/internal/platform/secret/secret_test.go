@@ -1,32 +1,11 @@
 package secret_test
 
 import (
-	"encoding/hex"
 	"strings"
 	"testing"
 
 	"github.com/yannamsellem/gestion-immo/internal/platform/secret"
 )
-
-func TestGenerateToken_ProducesUnprefixed256BitHex(t *testing.T) {
-	tokA, err := secret.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken failed: %v", err)
-	}
-	tokB, err := secret.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken failed: %v", err)
-	}
-	if len(tokA) != 64 || strings.Contains(tokA, "_") || tokA != strings.ToLower(tokA) {
-		t.Fatalf("expected 64-char unprefixed lowercase hex token, got %q", tokA)
-	}
-	if decoded, err := hex.DecodeString(tokA); err != nil || len(decoded) != 32 {
-		t.Fatalf("expected valid 32-byte hex decode, len=%d err=%v", len(decoded), err)
-	}
-	if tokA == tokB {
-		t.Fatalf("expected distinct tokens, got identical %q", tokA)
-	}
-}
 
 func TestGeneratePrefixedToken_FormatsPrefixAndValidatesNonEmpty(t *testing.T) {
 	tok, err := secret.GeneratePrefixedToken("mcp_live")

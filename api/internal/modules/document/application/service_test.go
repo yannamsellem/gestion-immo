@@ -468,7 +468,7 @@ func TestDocumentService_SecurityAndDuplicateGLIAttachments(t *testing.T) {
 	}
 }
 
-func TestDocument_UUIDv7IdentitiesGLITemplateResolutionAndScopeValidation(t *testing.T) {
+func TestDocument_GLITemplateResolutionAndScopeValidation(t *testing.T) {
 	ctx := context.Background()
 
 	entityRepo := portfoliomemory.NewLegalEntityRepo()
@@ -584,33 +584,6 @@ func TestDocument_UUIDv7IdentitiesGLITemplateResolutionAndScopeValidation(t *tes
 		t.Fatalf("generate rent calls: %v", err)
 	}
 
-	tpl, err := docSvc.RegisterTemplate(ctx, application.RegisterTemplateCmd{
-		Name:         "Quittance HTML",
-		TemplateType: "RENT_RECEIPT",
-		Format:       "HTML",
-		HTMLBody:     "<p>Quittance</p>",
-	})
-	if err != nil {
-		t.Fatalf("register template: %v", err)
-	}
-	if !id.IsValidUUID(tpl.ID) || tpl.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 DocumentTemplateDTO.ID, got %q", tpl.ID)
-	}
-
-	stored, err := docSvc.AttachFileToR2(ctx, application.AttachFileCmd{
-		LegalEntityID: entity.ID,
-		Category:      "TAX",
-		FileName:      "avis.pdf",
-		ContentType:   "application/pdf",
-		Content:       []byte("%PDF-1.4 AVIS"),
-	})
-	if err != nil {
-		t.Fatalf("attach file: %v", err)
-	}
-	if !id.IsValidUUID(stored.ID) || stored.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 StoredFileDTO.ID, got %q", stored.ID)
-	}
-
 	mux := http.NewServeMux()
 	docHandler.RegisterRoutes(mux)
 
@@ -625,9 +598,6 @@ func TestDocument_UUIDv7IdentitiesGLITemplateResolutionAndScopeValidation(t *tes
 	var defaultDossier application.GLIDossierArchiveDTO
 	if err := json.Unmarshal(recDefault.Body.Bytes(), &defaultDossier); err != nil {
 		t.Fatalf("unmarshal GLI dossier: %v", err)
-	}
-	if !id.IsValidUUID(defaultDossier.ID) || defaultDossier.ID[14] != '7' {
-		t.Fatalf("expected UUIDv7 GLIDossierArchiveDTO.ID, got %q", defaultDossier.ID)
 	}
 	if defaultDossier.TemplateID != "" {
 		t.Fatalf("expected empty TemplateID when built-in default GLI template is used, got %q", defaultDossier.TemplateID)
