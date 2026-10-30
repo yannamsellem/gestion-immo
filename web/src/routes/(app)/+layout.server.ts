@@ -9,14 +9,7 @@ export const load: LayoutServerLoad = async ({ locals, cookies }) => {
 	}
 
 	try {
-		const [entities, incidents] = await Promise.all([
-			locals.api.portfolio.listEntities(),
-			locals.api.inspection.listIncidents().catch(() => [])
-		]);
-
-		const openIncidentsCount = incidents.filter(
-			(inc) => inc.status === 'OPEN' || inc.status === 'IN_PROGRESS'
-		).length;
+		const entities = await locals.api.portfolio.listEntities();
 
 		const validEntityId =
 			locals.selectedEntityId !== 'ALL' &&
@@ -30,7 +23,7 @@ export const load: LayoutServerLoad = async ({ locals, cookies }) => {
 		return {
 			user: locals.user,
 			entities,
-			openIncidentsCount,
+			entitiesLoadError: null as string | null,
 			selectedEntityId: validEntityId,
 			selectedPeriodMonth: locals.selectedPeriodMonth
 		};
@@ -43,7 +36,10 @@ export const load: LayoutServerLoad = async ({ locals, cookies }) => {
 		return {
 			user: locals.user,
 			entities: [],
-			openIncidentsCount: 0,
+			entitiesLoadError:
+				err instanceof ApiError
+					? err.message
+					: 'Impossible de charger la liste des entités juridiques.',
 			selectedEntityId: locals.selectedEntityId,
 			selectedPeriodMonth: locals.selectedPeriodMonth
 		};

@@ -2,6 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { ApiError } from '#lib/core/api/api-error';
 import { parseEuroToCents } from '#lib/core/formatters/money';
 import type { EntityPortfolioSummaryDTO } from '#lib/modules/portfolio/types';
+import { setWorkspaceCookies } from '#lib/server/cookies';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, parent }) => {
@@ -41,7 +42,7 @@ export const load: PageServerLoad = async ({ locals, parent }) => {
 };
 
 export const actions: Actions = {
-	createEntity: async ({ request, locals }) => {
+	createEntity: async ({ request, locals, cookies, url }) => {
 		const formData = await request.formData();
 		const name = String(formData.get('name') ?? '').trim();
 		const entityType = String(formData.get('entity_type') ?? 'SCI_IS').trim();
@@ -74,6 +75,7 @@ export const actions: Actions = {
 				share_capital_cents: shareCapitalCents,
 				total_shares: totalShares
 			});
+			setWorkspaceCookies(cookies, { selectedEntityId: created.id }, url.protocol === 'https:');
 			return {
 				createdEntity: created,
 				successMessage: `Entité « ${created.name} » créée.`
