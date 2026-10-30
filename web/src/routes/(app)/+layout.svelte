@@ -99,21 +99,6 @@
 	</div>
 {:else if gateState === 'onboarding_required'}
 	<div class="flex min-h-svh flex-col bg-muted/30">
-		<header
-			class="pointer-events-auto relative z-60 flex h-12 items-center justify-between border-b bg-background/95 px-4 backdrop-blur"
-		>
-			<span class="text-sm font-semibold tracking-tight">Gestion Immo</span>
-			<div class="flex items-center gap-2">
-				<ThemeToggle />
-				<form method="POST" action={resolve('/(auth)/logout')} use:enhance>
-					<Button type="submit" variant="ghost" size="sm">
-						<IconLogout data-icon="inline-start" />
-						Se déconnecter
-					</Button>
-				</form>
-			</div>
-		</header>
-
 		<CreateEntityDialog open={true} persistent={true} />
 	</div>
 {:else}

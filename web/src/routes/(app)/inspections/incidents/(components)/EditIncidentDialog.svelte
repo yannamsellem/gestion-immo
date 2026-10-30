@@ -12,6 +12,7 @@
 	import { Separator } from '#lib/components/ui/separator/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import { formatIsoDateFr } from '#lib/core/formatters/date';
+	import { formatCentsToEuroInput } from '#lib/core/formatters/money';
 	import {
 		formatIncidentStatusLabel,
 		INCIDENT_STATUS_OPTIONS
@@ -40,7 +41,7 @@
 		if (open && incident && syncedIncidentId !== incident.id) {
 			status = incident.status;
 			claimNumber = incident.insurance_claim_number ?? '';
-			costEuro = (incident.estimated_cost_cents / 100).toFixed(2).replace('.', ',');
+			costEuro = formatCentsToEuroInput(incident.estimated_cost_cents);
 			newObservation = '';
 			errorMessage = null;
 			syncedIncidentId = incident.id;

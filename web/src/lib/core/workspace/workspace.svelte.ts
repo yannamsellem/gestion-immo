@@ -35,20 +35,20 @@ class WorkspaceStore {
 		}
 	}
 
-	setEntityId(entityId: 'ALL' | string): void {
+	async setEntityId(entityId: 'ALL' | string): Promise<void> {
 		this.selectedEntityId = entityId;
 		if (typeof document !== 'undefined') {
 			document.cookie = `${WORKSPACE_ENTITY_COOKIE}=${encodeURIComponent(entityId)}; path=/; max-age=31536000; SameSite=Lax`;
-			void invalidateAll();
+			await invalidateAll();
 		}
 	}
 
-	setPeriodMonth(periodMonth: string): void {
+	async setPeriodMonth(periodMonth: string): Promise<void> {
 		if (/^\d{4}-\d{2}$/.test(periodMonth)) {
 			this.selectedPeriodMonth = periodMonth;
 			if (typeof document !== 'undefined') {
 				document.cookie = `${WORKSPACE_PERIOD_COOKIE}=${encodeURIComponent(periodMonth)}; path=/; max-age=31536000; SameSite=Lax`;
-				void invalidateAll();
+				await invalidateAll();
 			}
 		}
 	}

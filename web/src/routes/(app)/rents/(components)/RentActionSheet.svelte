@@ -17,7 +17,7 @@
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import { formatIsoDateFr, formatPeriodMonthFr } from '#lib/core/formatters/date';
-	import { formatCentsToEuro } from '#lib/core/formatters/money';
+	import { formatCentsToEuro, formatCentsToEuroInput } from '#lib/core/formatters/money';
 	import { formatTemplateTypeLabel } from '#lib/modules/document/labels';
 	import type {
 		DocumentTemplateDTO,
@@ -27,6 +27,7 @@
 	import type { LeaseDTO, RentCallDTO } from '#lib/modules/lease/types';
 	import { formatPaymentMethodLabel, PAYMENT_METHOD_OPTIONS } from '#lib/modules/payment/labels';
 	import type { NegativePositionDTO, PaymentMethod } from '#lib/modules/payment/types';
+	import { computeExpectedLeaseGrossCents } from './rent-rows';
 
 	let {
 		open = $bindable(false),
@@ -81,14 +82,10 @@
 			? formatCentsToEuro(
 					rentCall?.remaining_due_cents ??
 						negativePosition?.total_unpaid_cents ??
-						lease.rent_net_cents + lease.charges_cents
+						computeExpectedLeaseGrossCents(lease)
 				)
 			: '0,00 €'
 	);
-
-	function centsToEditableEuroString(cents: number): string {
-		return (cents / 100).toFixed(2).replace('.', ',');
-	}
 
 	$effect(() => {
 		if (!open || !lease) {
@@ -102,9 +99,9 @@
 					? negativePosition.total_unpaid_cents
 					: rentCall
 						? rentCall.total_due_cents
-						: lease.rent_net_cents + lease.charges_cents;
+						: computeExpectedLeaseGrossCents(lease);
 
-		amountEuroInput = centsToEditableEuroString(defaultDueCents);
+		amountEuroInput = formatCentsToEuroInput(defaultDueCents);
 		paymentLabel = tenantName
 			? `Loyer ${formatPeriodMonthFr(periodMonth)} — ${tenantName}`
 			: `Loyer ${formatPeriodMonthFr(periodMonth)}`;

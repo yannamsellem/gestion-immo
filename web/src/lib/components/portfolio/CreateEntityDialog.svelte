@@ -6,6 +6,7 @@
 	import IconBuildingSkyscraper from '@tabler/icons-svelte/icons/building-skyscraper';
 	import IconLogout from '@tabler/icons-svelte/icons/logout';
 	import { toast } from 'svelte-sonner';
+	import ThemeToggle from '#lib/components/layout/ThemeToggle.svelte';
 	import * as Alert from '#lib/components/ui/alert/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
@@ -110,37 +111,40 @@
 				isSubmitting = true;
 				errorMessage = null;
 				return async ({ result }) => {
-					isSubmitting = false;
-					if (result.type === 'success') {
-						const payload = result.data as
-							{ createdEntity?: LegalEntityDTO; successMessage?: string } | undefined;
-						toast.success(payload?.successMessage ?? 'Entité juridique créée.');
-						resetForm();
-						if (payload?.createdEntity) {
-							workspaceStore.setEntityId(payload.createdEntity.id);
-							onCreated?.(payload.createdEntity);
-						} else {
-							await invalidateAll();
+					try {
+						if (result.type === 'success') {
+							const payload = result.data as
+								{ createdEntity?: LegalEntityDTO; successMessage?: string } | undefined;
+							toast.success(payload?.successMessage ?? 'Entité juridique créée.');
+							if (payload?.createdEntity) {
+								await workspaceStore.setEntityId(payload.createdEntity.id);
+								onCreated?.(payload.createdEntity);
+							} else {
+								await invalidateAll();
+							}
+							if (!persistent) {
+								resetForm();
+								open = false;
+							}
+							return;
 						}
-						if (!persistent) {
-							open = false;
+
+						if (result.type === 'failure') {
+							const payload = result.data as { actionError?: string } | undefined;
+							const message = payload?.actionError ?? 'Impossible de créer l’entité juridique.';
+							errorMessage = message;
+							toast.error(message);
+							return;
 						}
-						return;
-					}
 
-					if (result.type === 'failure') {
-						const payload = result.data as { actionError?: string } | undefined;
-						const message = payload?.actionError ?? 'Impossible de créer l’entité juridique.';
-						errorMessage = message;
-						toast.error(message);
-						return;
-					}
-
-					if (result.type === 'error') {
-						const message =
-							result.error?.message ?? 'Erreur serveur lors de la création de l’entité.';
-						errorMessage = message;
-						toast.error(message);
+						if (result.type === 'error') {
+							const message =
+								result.error?.message ?? 'Erreur serveur lors de la création de l’entité.';
+							errorMessage = message;
+							toast.error(message);
+						}
+					} finally {
+						isSubmitting = false;
 					}
 				};
 			}}
@@ -275,12 +279,15 @@
 			<Separator />
 			<div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
 				<span>Connecté avec un autre compte ?</span>
-				<form method="POST" action={resolve('/(auth)/logout')} use:enhance>
-					<Button type="submit" variant="ghost" size="sm">
-						<IconLogout data-icon="inline-start" />
-						Se déconnecter
-					</Button>
-				</form>
+				<div class="flex items-center gap-1.5">
+					<ThemeToggle />
+					<form method="POST" action={resolve('/(auth)/logout')} use:enhance>
+						<Button type="submit" variant="ghost" size="sm">
+							<IconLogout data-icon="inline-start" />
+							Se déconnecter
+						</Button>
+					</form>
+				</div>
 			</div>
 		{/if}
 	</Dialog.Content>

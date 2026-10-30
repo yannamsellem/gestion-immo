@@ -25,6 +25,18 @@ export interface RentSummaryTotals {
 	overdueCount: number;
 }
 
+export function computeExpectedLeaseGrossCents(
+	lease: Pick<
+		LeaseDTO,
+		'rent_net_cents' | 'subject_to_vat' | 'vat_rate_basis_points' | 'charges_cents'
+	>
+): number {
+	const vatCents = lease.subject_to_vat
+		? Math.trunc((lease.rent_net_cents * lease.vat_rate_basis_points) / 10000)
+		: 0;
+	return lease.rent_net_cents + vatCents + lease.charges_cents;
+}
+
 export function buildUnifiedRentRows(params: {
 	entities: LegalEntityDTO[];
 	leases: LeaseDTO[];
@@ -66,12 +78,9 @@ export function buildUnifiedRentRows(params: {
 			const entity = entityMap.get(lease.legal_entity_id) ?? params.entities[0];
 			const rentCall = rentCallByLeaseId.get(lease.id) ?? null;
 			const negativePosition = negativeByLeaseId.get(lease.id) ?? null;
-			const vatCents = lease.subject_to_vat
-				? Math.trunc((lease.rent_net_cents * lease.vat_rate_basis_points) / 10000)
-				: 0;
 			const expectedGrossCents = rentCall
 				? rentCall.total_due_cents
-				: lease.rent_net_cents + vatCents + lease.charges_cents;
+				: computeExpectedLeaseGrossCents(lease);
 			const remainingDueCents = rentCall ? rentCall.remaining_due_cents : expectedGrossCents;
 
 			let statusCategory: 'PAID' | 'OVERDUE' | 'TO_COLLECT' = 'TO_COLLECT';

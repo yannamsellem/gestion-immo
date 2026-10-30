@@ -1,7 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { buildUnifiedRentRows, summarizeRentRows } from './rent-rows';
+import {
+	buildUnifiedRentRows,
+	computeExpectedLeaseGrossCents,
+	summarizeRentRows
+} from './rent-rows';
 
 describe('buildUnifiedRentRows & summarizeRentRows', () => {
+	it('includes commercial VAT in computeExpectedLeaseGrossCents when rentCall is absent', () => {
+		expect(
+			computeExpectedLeaseGrossCents({
+				rent_net_cents: 100000,
+				subject_to_vat: true,
+				vat_rate_basis_points: 2000,
+				charges_cents: 15000
+			})
+		).toBe(135000);
+		expect(
+			computeExpectedLeaseGrossCents({
+				rent_net_cents: 80000,
+				subject_to_vat: false,
+				vat_rate_basis_points: 2000,
+				charges_cents: 5000
+			})
+		).toBe(85000);
+	});
+
 	it('computes integer VAT/gross rent, categorizes PAID/OVERDUE/TO_COLLECT, and summarizes totals', () => {
 		const rows = buildUnifiedRentRows({
 			entities: [
@@ -43,7 +66,7 @@ describe('buildUnifiedRentRows & summarizeRentRows', () => {
 					legal_entity_id: 'ent_1',
 					lot_id: 'lot_2',
 					tenant_id: 'ten_2',
-					lease_type: 'RESIDENTIAL_EMPTY',
+					lease_type: 'RESIDENTIAL_UNFURNISHED',
 					rent_net_cents: 80000,
 					charges_cents: 5000,
 					subject_to_vat: false,

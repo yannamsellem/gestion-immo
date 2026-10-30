@@ -23,6 +23,22 @@ export function formatCentsToEuro(cents: number): string {
 }
 
 /**
+ * Formats integer euro cents into an editable French decimal input string (e.g. "1234,56")
+ * using pure integer quotient and remainder arithmetic without floating-point formatting.
+ */
+export function formatCentsToEuroInput(cents: number): string {
+	if (!Number.isFinite(cents)) {
+		return '0,00';
+	}
+	const truncated = Math.trunc(cents);
+	const sign = truncated < 0 ? '-' : '';
+	const absCents = Math.abs(truncated);
+	const whole = Math.trunc(absCents / 100);
+	const remainder = String(absCents % 100).padStart(2, '0');
+	return `${sign}${whole},${remainder}`;
+}
+
+/**
  * Parses a user-entered French or dot-decimal euro string (e.g. "1 234,56 €", "920,5", "580")
  * into exact integer cents without floating-point multiplication.
  */

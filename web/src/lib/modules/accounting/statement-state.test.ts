@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ENTITY_TYPE_OPTIONS } from '#lib/modules/portfolio/labels';
 import type { LegalEntityDTO } from '#lib/modules/portfolio/types';
 import {
 	evaluateJournalBalance,
@@ -23,7 +24,7 @@ const SAMPLE_ENTITIES: LegalEntityDTO[] = [
 	{
 		id: 'ent_2',
 		name: 'SARL Vendôme',
-		entity_type: 'SARL_FAMILLE',
+		entity_type: 'FAMILY_SARL',
 		siret: '98765432100022',
 		naf_code: '6820A',
 		address: '8 place Vendôme, Paris',
@@ -112,5 +113,12 @@ describe('resolveAccountingContext', () => {
 			activeEntityId: 'ent_2',
 			fiscalYear: currentYear
 		});
+	});
+
+	it('uses canonical 100% English OpenAPI EntityType values in SAMPLE_ENTITIES', () => {
+		const validEntityTypes = new Set(ENTITY_TYPE_OPTIONS.map((option) => option.value));
+		for (const entity of SAMPLE_ENTITIES) {
+			expect(validEntityTypes.has(entity.entity_type)).toBe(true);
+		}
 	});
 });
