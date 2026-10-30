@@ -4,11 +4,7 @@ import { formatPeriodMonthFr } from '#lib/core/formatters/date';
 import { formatCentsToEuro, parseEuroToCents } from '#lib/core/formatters/money';
 import type { StoredFileDTO } from '#lib/modules/document/types';
 import type { RentCallDTO } from '#lib/modules/lease/types';
-import type {
-	CashJournalEntryDTO,
-	NegativePositionDTO,
-	PaymentMethod
-} from '#lib/modules/payment/types';
+import type { NegativePositionDTO, PaymentMethod } from '#lib/modules/payment/types';
 import type { PropertyDTO } from '#lib/modules/portfolio/types';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -33,21 +29,18 @@ export const load: PageServerLoad = async ({ locals, parent }) => {
 		const propertiesByEntity: Record<string, PropertyDTO[]> = {};
 		const rentCallsByEntity: Record<string, RentCallDTO[]> = {};
 		const negativePositionsByEntity: Record<string, NegativePositionDTO[]> = {};
-		const cashJournalByEntity: Record<string, CashJournalEntryDTO[]> = {};
 		const documentsByLeaseId: Record<string, StoredFileDTO[]> = {};
 
 		await Promise.all([
 			...targetEntities.map(async (entity) => {
-				const [props, calls, negatives, cashEntries] = await Promise.all([
+				const [props, calls, negatives] = await Promise.all([
 					locals.api.portfolio.listProperties(entity.id),
 					locals.api.lease.listEntityRentCalls(entity.id, periodMonth),
-					locals.api.payment.listNegativePositions(entity.id).catch(() => []),
-					locals.api.payment.listCashJournal(entity.id).catch(() => [])
+					locals.api.payment.listNegativePositions(entity.id).catch(() => [])
 				]);
 				propertiesByEntity[entity.id] = props;
 				rentCallsByEntity[entity.id] = calls;
 				negativePositionsByEntity[entity.id] = negatives;
-				cashJournalByEntity[entity.id] = cashEntries;
 			}),
 			...activeLeases.map(async (lease) => {
 				const docs = await locals.api.document.listLeaseDocuments(lease.id).catch(() => []);
@@ -63,7 +56,6 @@ export const load: PageServerLoad = async ({ locals, parent }) => {
 			propertiesByEntity,
 			rentCallsByEntity,
 			negativePositionsByEntity,
-			cashJournalByEntity,
 			documentsByLeaseId,
 			errorMessage: null as string | null
 		};
@@ -73,11 +65,10 @@ export const load: PageServerLoad = async ({ locals, parent }) => {
 			leases: [],
 			tenants: [],
 			templates: [],
-			propertiesByEntity: {},
-			rentCallsByEntity: {},
-			negativePositionsByEntity: {},
-			cashJournalByEntity: {},
-			documentsByLeaseId: {},
+			propertiesByEntity: {} as Record<string, PropertyDTO[]>,
+			rentCallsByEntity: {} as Record<string, RentCallDTO[]>,
+			negativePositionsByEntity: {} as Record<string, NegativePositionDTO[]>,
+			documentsByLeaseId: {} as Record<string, StoredFileDTO[]>,
 			errorMessage:
 				err instanceof ApiError
 					? err.message
@@ -140,44 +131,6 @@ export const actions: Actions = {
 		} catch (err) {
 			return fail(err instanceof ApiError ? err.status : 500, {
 				actionError: err instanceof ApiError ? err.message : 'Échec de l’import bancaire CSV.'
-			});
-		}
-	},
-
-	cashDeposit: async ({ request, locals }) => {
-		const formData = await request.formData();
-		const entityId = String(formData.get('legal_entity_id') ?? '').trim();
-		const amountEuro = String(formData.get('amount_euro') ?? '');
-		const label =
-			String(formData.get('label') ?? '').trim() || 'Remise espèces en banque (530 → 512)';
-		const entryDate = String(formData.get('entry_date') ?? '').trim();
-
-		let amountCents: number;
-		try {
-			amountCents = parseEuroToCents(amountEuro);
-		} catch {
-			return fail(400, { actionError: 'Montant de remise en banque invalide.' });
-		}
-
-		if (!entityId || amountCents <= 0) {
-			return fail(400, { actionError: 'Le montant déposé doit être supérieur à 0 €.' });
-		}
-
-		try {
-			await locals.api.payment.recordCashDeposit({
-				legal_entity_id: entityId,
-				amount_cents: amountCents,
-				label,
-				entry_date: entryDate ? new Date(entryDate).toISOString() : undefined
-			});
-			return {
-				depositRecorded: true,
-				successMessage: 'Remise d’espèces en banque enregistrée (écriture 530 → 512).'
-			};
-		} catch (err) {
-			return fail(err instanceof ApiError ? err.status : 500, {
-				actionError:
-					err instanceof ApiError ? err.message : 'Impossible d’enregistrer la remise d’espèces.'
 			});
 		}
 	},

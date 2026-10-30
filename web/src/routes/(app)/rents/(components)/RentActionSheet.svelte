@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import IconCash from '@tabler/icons-svelte/icons/cash';
 	import IconDownload from '@tabler/icons-svelte/icons/download';
 	import IconFileText from '@tabler/icons-svelte/icons/file-text';
 	import IconFileZip from '@tabler/icons-svelte/icons/file-zip';
 	import IconShieldExclamation from '@tabler/icons-svelte/icons/shield-exclamation';
+	import { toast } from 'svelte-sonner';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Field from '#lib/components/ui/field/index.js';
@@ -15,12 +18,14 @@
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import { formatIsoDateFr, formatPeriodMonthFr } from '#lib/core/formatters/date';
 	import { formatCentsToEuro } from '#lib/core/formatters/money';
+	import { formatTemplateTypeLabel } from '#lib/modules/document/labels';
 	import type {
 		DocumentTemplateDTO,
 		GLIDossierArchiveDTO,
 		StoredFileDTO
 	} from '#lib/modules/document/types';
 	import type { LeaseDTO, RentCallDTO } from '#lib/modules/lease/types';
+	import { formatPaymentMethodLabel, PAYMENT_METHOD_OPTIONS } from '#lib/modules/payment/labels';
 	import type { NegativePositionDTO, PaymentMethod } from '#lib/modules/payment/types';
 
 	let {
@@ -34,10 +39,9 @@
 		periodMonth,
 		templates = [],
 		leaseDocuments = [],
-		assembledGliArchive = null,
 		initialAction = null
 	}: {
-		open: boolean;
+		open?: boolean;
 		lease: LeaseDTO | null;
 		rentCall: RentCallDTO | null;
 		negativePosition: NegativePositionDTO | null;
@@ -47,16 +51,8 @@
 		periodMonth: string;
 		templates?: DocumentTemplateDTO[];
 		leaseDocuments?: StoredFileDTO[];
-		assembledGliArchive?: GLIDossierArchiveDTO | null;
 		initialAction?: 'pay' | 'remind' | 'generate-calls' | null;
 	} = $props();
-
-	const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string }> = [
-		{ value: 'BANK_TRANSFER', label: 'Virement bancaire' },
-		{ value: 'DIRECT_DEBIT', label: 'Prélèvement automatique' },
-		{ value: 'CHECK', label: 'Chèque' },
-		{ value: 'CASH', label: 'Espèces (Livre de caisse PCG 530)' }
-	];
 
 	let amountEuroInput = $state('');
 	let paymentMethod = $state<PaymentMethod>('BANK_TRANSFER');
@@ -68,18 +64,16 @@
 	let selectedTemplateId = $state('');
 	let isGeneratingDoc = $state(false);
 	let isAssemblingGli = $state(false);
-
-	const selectedMethodLabel = $derived(
-		PAYMENT_METHODS.find((item) => item.value === paymentMethod)?.label ?? 'Virement bancaire'
-	);
+	let assembledGliArchive = $state<GLIDossierArchiveDTO | null>(null);
 
 	const selectedTemplateLabel = $derived(
 		templates.find((tpl) => tpl.id === selectedTemplateId)?.name ?? 'Choisir un modèle de document'
 	);
 
 	const gliTemplateId = $derived(
-		templates.find((tpl) => tpl.template_type === 'GLI_NOTICE' || tpl.template_type === 'REMINDER')
-			?.id ?? selectedTemplateId
+		templates.find(
+			(tpl) => tpl.template_type === 'GLI_DECLARATION' || tpl.template_type === 'FORMAL_NOTICE'
+		)?.id ?? selectedTemplateId
 	);
 
 	const formattedAmountDue = $derived(
@@ -116,8 +110,12 @@
 			: `Loyer ${formatPeriodMonthFr(periodMonth)}`;
 		paymentReference = '';
 
-		if (templates.length > 0 && !selectedTemplateId) {
-			const preferredType = initialAction === 'remind' ? 'REMINDER' : 'RECEIPT';
+		if (assembledGliArchive && assembledGliArchive.lease_id !== lease.id) {
+			assembledGliArchive = null;
+		}
+
+		if (templates.length > 0) {
+			const preferredType = initialAction === 'remind' ? 'FORMAL_NOTICE' : 'RENT_RECEIPT';
 			const preferred =
 				templates.find((tpl) => tpl.template_type === preferredType) ?? templates[0];
 			selectedTemplateId = preferred.id;
@@ -156,9 +154,27 @@
 					action="?/recordPayment"
 					use:enhance={() => {
 						isSubmittingPayment = true;
-						return async ({ update }) => {
-							await update();
+						return async ({ result }) => {
 							isSubmittingPayment = false;
+							if (result.type === 'success') {
+								const payload = result.data as { successMessage?: string } | undefined;
+								toast.success(payload?.successMessage ?? 'Règlement enregistré et imputé (FIFO).');
+								paymentReference = '';
+								await invalidateAll();
+								return;
+							}
+							if (result.type === 'failure') {
+								const payload = result.data as { actionError?: string } | undefined;
+								toast.error(
+									payload?.actionError ?? 'Impossible d’enregistrer le règlement pour ce bail.'
+								);
+								return;
+							}
+							if (result.type === 'error') {
+								toast.error(
+									result.error?.message ?? 'Erreur serveur lors de l’enregistrement du règlement.'
+								);
+							}
 						};
 					}}
 					class="flex flex-col gap-4"
@@ -177,7 +193,7 @@
 						{/if}
 					</div>
 
-					<Field.FieldGroup>
+					<Field.Group>
 						<div class="grid gap-3 sm:grid-cols-2">
 							<Field.Field>
 								<Field.Label for="payment-amount">Montant encaissé (€)</Field.Label>
@@ -209,18 +225,18 @@
 							<Select.Root
 								type="single"
 								value={paymentMethod}
-								onValueChange={(val) => {
-									if (val) paymentMethod = val;
+								onValueChange={(next) => {
+									if (next) paymentMethod = next;
 								}}
 							>
 								<Select.Trigger class="w-full">
-									{selectedMethodLabel}
+									{formatPaymentMethodLabel(paymentMethod)}
 								</Select.Trigger>
 								<Select.Content>
 									<Select.Group>
-										{#each PAYMENT_METHODS as method (method.value)}
-											<Select.Item value={method.value} label={method.label}>
-												{method.label}
+										{#each PAYMENT_METHOD_OPTIONS as option (option.value)}
+											<Select.Item value={option.value} label={option.label}>
+												{option.label}
 											</Select.Item>
 										{/each}
 									</Select.Group>
@@ -254,7 +270,7 @@
 								/>
 							</Field.Field>
 						</div>
-					</Field.FieldGroup>
+					</Field.Group>
 
 					<Button type="submit" disabled={isSubmittingPayment}>
 						{#if isSubmittingPayment}
@@ -272,7 +288,7 @@
 				<div class="flex flex-col gap-3">
 					<h3 class="flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase">
 						<IconFileText class="size-4" />
-						2. Avis d'échéance & Quittances
+						2. Avis d’échéance & Quittances
 					</h3>
 
 					{#if templates.length > 0}
@@ -281,9 +297,24 @@
 							action="?/generateDoc"
 							use:enhance={() => {
 								isGeneratingDoc = true;
-								return async ({ update }) => {
-									await update();
+								return async ({ result }) => {
 									isGeneratingDoc = false;
+									if (result.type === 'success') {
+										const payload = result.data as { successMessage?: string } | undefined;
+										toast.success(payload?.successMessage ?? 'Document généré.');
+										await invalidateAll();
+										return;
+									}
+									if (result.type === 'failure') {
+										const payload = result.data as { actionError?: string } | undefined;
+										toast.error(payload?.actionError ?? 'Échec de la génération du document.');
+										return;
+									}
+									if (result.type === 'error') {
+										toast.error(
+											result.error?.message ?? 'Erreur serveur lors de la génération du document.'
+										);
+									}
 								};
 							}}
 							class="flex flex-col gap-2 sm:flex-row sm:items-end"
@@ -301,8 +332,8 @@
 								<Select.Root
 									type="single"
 									value={selectedTemplateId}
-									onValueChange={(val) => {
-										if (val) selectedTemplateId = val;
+									onValueChange={(next) => {
+										if (next) selectedTemplateId = next;
 									}}
 								>
 									<Select.Trigger class="w-full">
@@ -310,9 +341,9 @@
 									</Select.Trigger>
 									<Select.Content>
 										<Select.Group>
-											{#each templates as tpl (tpl.id)}
-												<Select.Item value={tpl.id} label={tpl.name}>
-													{tpl.name} ({tpl.template_type})
+											{#each templates as template (template.id)}
+												<Select.Item value={template.id} label={template.name}>
+													{template.name} ({formatTemplateTypeLabel(template.template_type)})
 												</Select.Item>
 											{/each}
 										</Select.Group>
@@ -332,8 +363,14 @@
 						</form>
 					{:else}
 						<p class="text-xs text-muted-foreground">
-							Aucun modèle de document enregistré. Vous pouvez en créer un depuis les paramètres ou
-							utiliser l'assemblage GLI.
+							Aucun modèle de document enregistré. Créez-en un dans
+							<a
+								href={resolve('/(app)/leases/templates')}
+								class="font-medium underline underline-offset-4"
+							>
+								Modèles de documents
+							</a>
+							ou utilisez l’assemblage GLI.
 						</p>
 					{/if}
 
@@ -409,9 +446,32 @@
 						action="?/assembleGli"
 						use:enhance={() => {
 							isAssemblingGli = true;
-							return async ({ update }) => {
-								await update();
+							return async ({ result }) => {
 								isAssemblingGli = false;
+								if (result.type === 'success') {
+									const payload = result.data as
+										{ gliArchive?: GLIDossierArchiveDTO; successMessage?: string } | undefined;
+									if (payload?.gliArchive) {
+										assembledGliArchive = payload.gliArchive;
+									}
+									toast.success(
+										payload?.successMessage ?? 'Dossier sinistre GLI (.zip) assemblé avec succès.'
+									);
+									await invalidateAll();
+									return;
+								}
+								if (result.type === 'failure') {
+									const payload = result.data as { actionError?: string } | undefined;
+									toast.error(
+										payload?.actionError ?? 'Impossible d’assembler le dossier de sinistre GLI.'
+									);
+									return;
+								}
+								if (result.type === 'error') {
+									toast.error(
+										result.error?.message ?? 'Erreur serveur lors de l’assemblage du dossier GLI.'
+									);
+								}
 							};
 						}}
 					>
@@ -427,7 +487,7 @@
 						>
 							{#if isAssemblingGli}
 								<Spinner data-icon="inline-start" />
-								Assemblage de l'archive .zip...
+								Assemblage de l’archive .zip...
 							{:else}
 								<IconFileZip data-icon="inline-start" />
 								Assembler le dossier sinistre GLI (.zip)
