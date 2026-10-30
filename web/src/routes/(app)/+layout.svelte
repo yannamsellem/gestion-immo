@@ -121,7 +121,7 @@
 		<AppSidebar user={data.user} entities={data.entities} />
 		<Sidebar.Inset>
 			<header
-				class="sticky top-0 flex h-12 shrink-0 items-center justify-between gap-2 border-b bg-background/95 px-4 backdrop-blur"
+				class="sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between gap-2 border-b bg-background/95 px-4 backdrop-blur"
 			>
 				<div class="flex items-center gap-2">
 					<Sidebar.Trigger />

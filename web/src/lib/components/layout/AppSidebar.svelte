@@ -1,145 +1,289 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import IconBuildingBank from '@tabler/icons-svelte/icons/building-bank';
 	import IconCalculator from '@tabler/icons-svelte/icons/calculator';
+	import IconChevronRight from '@tabler/icons-svelte/icons/chevron-right';
 	import IconClipboardCheck from '@tabler/icons-svelte/icons/clipboard-check';
 	import IconFileText from '@tabler/icons-svelte/icons/file-text';
 	import IconHome from '@tabler/icons-svelte/icons/home';
 	import IconLayoutDashboard from '@tabler/icons-svelte/icons/layout-dashboard';
-	import IconLogout from '@tabler/icons-svelte/icons/logout';
 	import IconReceiptEuro from '@tabler/icons-svelte/icons/receipt-euro';
-	import IconShieldLock from '@tabler/icons-svelte/icons/shield-lock';
-	import { Button } from '#lib/components/ui/button/index.js';
+	import { untrack } from 'svelte';
+	import * as Collapsible from '#lib/components/ui/collapsible/index.js';
 	import * as Sidebar from '#lib/components/ui/sidebar/index.js';
 	import type { UserDTO } from '#lib/modules/auth/types';
 	import type { LegalEntityDTO } from '#lib/modules/portfolio/types';
-	import EntityWorkspaceSwitcher from './EntityWorkspaceSwitcher.svelte';
+	import EntitySwitcher from './EntitySwitcher.svelte';
+	import { isExactRouteActive, isGroupPathActive } from './sidebar-nav';
+	import SidebarUserMenu from './SidebarUserMenu.svelte';
 
 	let {
 		user = null,
-		entities = [],
-		pendingRentTasksCount = 0,
-		openIncidentsCount = 0
+		entities = []
 	}: {
 		user?: UserDTO | null;
 		entities?: LegalEntityDTO[];
-		pendingRentTasksCount?: number;
-		openIncidentsCount?: number;
 	} = $props();
 
-	const navItems = $derived([
-		{
-			route: '/(app)' as const,
-			label: 'Cockpit Opérationnel',
-			icon: IconLayoutDashboard,
-			badge: 0
-		},
-		{
-			route: '/(app)/rents' as const,
-			label: 'Loyers & Relances',
-			icon: IconReceiptEuro,
-			badge: pendingRentTasksCount
-		},
-		{
-			route: '/(app)/inspections' as const,
-			label: 'Incidents & États des lieux',
-			icon: IconClipboardCheck,
-			badge: openIncidentsCount
-		},
-		{
-			route: '/(app)/properties' as const,
-			label: 'Biens & Lots',
-			icon: IconHome,
-			badge: 0
-		},
-		{
-			route: '/(app)/leases' as const,
-			label: 'Baux & Locataires',
-			icon: IconFileText,
-			badge: 0
-		},
-		{
-			route: '/(app)/accounting' as const,
-			label: 'Comptabilité & Fiscalité',
-			icon: IconCalculator,
-			badge: 0
-		},
-		{
-			route: '/(app)/entities' as const,
-			label: 'Entités & Associés',
-			icon: IconBuildingBank,
-			badge: 0
-		},
-		{
-			route: '/(app)/admin' as const,
-			label: 'Administration & Accès',
-			icon: IconShieldLock,
-			badge: 0
-		}
-	]);
+	type TablerIconComponent = typeof IconHome;
 
-	function isRouteActive(href: string, currentPath: string): boolean {
-		if (href === '/') {
-			return currentPath === '/';
+	type AppLeafRoute =
+		| '/(app)/properties'
+		| '/(app)/leases'
+		| '/(app)/leases/tenants'
+		| '/(app)/leases/templates'
+		| '/(app)/rents'
+		| '/(app)/rents/cash-journal'
+		| '/(app)/inspections'
+		| '/(app)/inspections/incidents'
+		| '/(app)/inspections/templates'
+		| '/(app)/entities'
+		| '/(app)/accounting'
+		| '/(app)/accounting/journal'
+		| '/(app)/accounting/tax';
+
+	type NavSubItem = {
+		label: string;
+		route: AppLeafRoute;
+	};
+
+	type DirectNavItem = {
+		kind: 'direct';
+		key: string;
+		label: string;
+		route: AppLeafRoute;
+		icon: TablerIconComponent;
+	};
+
+	type CollapsibleNavItem = {
+		kind: 'collapsible';
+		key: 'leases' | 'rents' | 'inspections' | 'accounting';
+		label: string;
+		baseRoute: '/(app)/leases' | '/(app)/rents' | '/(app)/inspections' | '/(app)/accounting';
+		icon: TablerIconComponent;
+		items: NavSubItem[];
+	};
+
+	type SectionNavItem = DirectNavItem | CollapsibleNavItem;
+
+	const sidebar = Sidebar.useSidebar();
+
+	const menuButtonClass = 'h-9 gap-3 text-sm [&_svg]:size-5 group-data-[collapsible=icon]:size-9!';
+	const menuSubButtonClass = 'h-8 text-sm data-[size=md]:text-sm';
+
+	const propertyOperationsItems: SectionNavItem[] = [
+		{
+			kind: 'direct',
+			key: 'properties',
+			label: 'Biens & Lots',
+			route: '/(app)/properties',
+			icon: IconHome
+		},
+		{
+			kind: 'collapsible',
+			key: 'leases',
+			label: 'Baux & Locataires',
+			baseRoute: '/(app)/leases',
+			icon: IconFileText,
+			items: [
+				{ label: 'Baux actifs', route: '/(app)/leases' },
+				{ label: 'Locataires', route: '/(app)/leases/tenants' },
+				{ label: 'Modèles de documents', route: '/(app)/leases/templates' }
+			]
+		},
+		{
+			kind: 'collapsible',
+			key: 'rents',
+			label: 'Loyers & Relances',
+			baseRoute: '/(app)/rents',
+			icon: IconReceiptEuro,
+			items: [
+				{ label: 'Appels & Encaissements', route: '/(app)/rents' },
+				{ label: 'Livre de caisse (530)', route: '/(app)/rents/cash-journal' }
+			]
+		},
+		{
+			kind: 'collapsible',
+			key: 'inspections',
+			label: 'États des lieux & Incidents',
+			baseRoute: '/(app)/inspections',
+			icon: IconClipboardCheck,
+			items: [
+				{ label: 'États des lieux', route: '/(app)/inspections' },
+				{ label: 'Incidents & Sinistres', route: '/(app)/inspections/incidents' },
+				{ label: 'Modèles d’EDL', route: '/(app)/inspections/templates' }
+			]
 		}
-		return currentPath === href || currentPath.startsWith(`${href}/`);
-	}
+	];
+
+	const corporateTaxItems: SectionNavItem[] = [
+		{
+			kind: 'direct',
+			key: 'entities',
+			label: 'Entités & Associés',
+			route: '/(app)/entities',
+			icon: IconBuildingBank
+		},
+		{
+			kind: 'collapsible',
+			key: 'accounting',
+			label: 'Comptabilité & Fiscalité',
+			baseRoute: '/(app)/accounting',
+			icon: IconCalculator,
+			items: [
+				{ label: 'Bilan & Compte de résultat', route: '/(app)/accounting' },
+				{ label: 'Journal & Balance PCG', route: '/(app)/accounting/journal' },
+				{ label: 'Liasse fiscale & Export FEC', route: '/(app)/accounting/tax' }
+			]
+		}
+	];
+
+	const collapsibleGroups = [...propertyOperationsItems, ...corporateTaxItems].filter(
+		(item): item is CollapsibleNavItem => item.kind === 'collapsible'
+	);
+
+	let openGroups = $state<Record<CollapsibleNavItem['key'], boolean>>({
+		leases: false,
+		rents: false,
+		inspections: false,
+		accounting: false
+	});
+
+	$effect(() => {
+		const pathname = page.url.pathname;
+
+		untrack(() => {
+			for (const group of collapsibleGroups) {
+				if (isGroupPathActive(resolve(group.baseRoute), pathname) && !openGroups[group.key]) {
+					openGroups[group.key] = true;
+				}
+			}
+		});
+	});
 </script>
 
-<Sidebar.Root collapsible="offcanvas">
-	<Sidebar.Header class="gap-3 border-b p-3">
-		<div class="flex flex-col px-1">
-			<span class="text-sm font-semibold tracking-tight">Gestion Immo</span>
-			<span class="text-[11px] text-muted-foreground">Back-office Patrimonial</span>
-		</div>
-		<EntityWorkspaceSwitcher {entities} />
+{#snippet renderSectionItems(items: SectionNavItem[])}
+	<Sidebar.Menu>
+		{#each items as item (item.key)}
+			{#if item.kind === 'direct'}
+				{@const Icon = item.icon}
+				<Sidebar.MenuItem>
+					<Sidebar.MenuButton
+						class={menuButtonClass}
+						tooltipContent={item.label}
+						isActive={isGroupPathActive(resolve(item.route), page.url.pathname)}
+					>
+						{#snippet child({ props })}
+							<a href={resolve(item.route)} {...props}>
+								<Icon />
+								<span>{item.label}</span>
+							</a>
+						{/snippet}
+					</Sidebar.MenuButton>
+				</Sidebar.MenuItem>
+			{:else}
+				{@const Icon = item.icon}
+				{@const groupActive = isGroupPathActive(resolve(item.baseRoute), page.url.pathname)}
+				<Collapsible.Root bind:open={openGroups[item.key]} class="group/collapsible">
+					<Sidebar.MenuItem>
+						<Collapsible.Trigger>
+							{#snippet child({ props })}
+								<Sidebar.MenuButton
+									{...props}
+									class={menuButtonClass}
+									tooltipContent={item.label}
+									isActive={groupActive && (!openGroups[item.key] || sidebar.state === 'collapsed')}
+									onclick={(event) => {
+										if (sidebar.state === 'collapsed' && !sidebar.isMobile) {
+											event.preventDefault();
+											sidebar.setOpen(true);
+											openGroups[item.key] = true;
+											return;
+										}
+										const triggerOnClick = props.onclick as ((e: MouseEvent) => void) | undefined;
+										triggerOnClick?.(event);
+									}}
+								>
+									<Icon />
+									<span>{item.label}</span>
+									<IconChevronRight
+										class="ml-auto size-4! transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
+									/>
+								</Sidebar.MenuButton>
+							{/snippet}
+						</Collapsible.Trigger>
+
+						<Collapsible.Content>
+							<Sidebar.MenuSub>
+								{#each item.items as subItem (subItem.route)}
+									<Sidebar.MenuSubItem>
+										<Sidebar.MenuSubButton
+											class={menuSubButtonClass}
+											isActive={isExactRouteActive(resolve(subItem.route), page.url.pathname)}
+										>
+											{#snippet child({ props })}
+												<a href={resolve(subItem.route)} {...props}>
+													<span>{subItem.label}</span>
+												</a>
+											{/snippet}
+										</Sidebar.MenuSubButton>
+									</Sidebar.MenuSubItem>
+								{/each}
+							</Sidebar.MenuSub>
+						</Collapsible.Content>
+					</Sidebar.MenuItem>
+				</Collapsible.Root>
+			{/if}
+		{/each}
+	</Sidebar.Menu>
+{/snippet}
+
+<Sidebar.Root collapsible="icon">
+	<Sidebar.Header>
+		<EntitySwitcher {entities} />
 	</Sidebar.Header>
 
 	<Sidebar.Content>
 		<Sidebar.Group>
-			<Sidebar.GroupLabel>Pilotage Métier</Sidebar.GroupLabel>
 			<Sidebar.GroupContent>
 				<Sidebar.Menu>
-					{#each navItems as item (item.route)}
-						{@const Icon = item.icon}
-						{@const resolvedHref = resolve(item.route)}
-						<Sidebar.MenuItem>
-							<Sidebar.MenuButton isActive={isRouteActive(resolvedHref, page.url.pathname)}>
-								{#snippet child({ props })}
-									<a href={resolvedHref} {...props}>
-										<Icon />
-										<span>{item.label}</span>
-									</a>
-								{/snippet}
-							</Sidebar.MenuButton>
-							{#if item.badge > 0}
-								<Sidebar.MenuBadge>{item.badge}</Sidebar.MenuBadge>
-							{/if}
-						</Sidebar.MenuItem>
-					{/each}
+					<Sidebar.MenuItem>
+						<Sidebar.MenuButton
+							class={menuButtonClass}
+							tooltipContent="Vue d’ensemble"
+							isActive={isExactRouteActive(resolve('/(app)'), page.url.pathname)}
+						>
+							{#snippet child({ props })}
+								<a href={resolve('/(app)')} {...props}>
+									<IconLayoutDashboard />
+									<span>Vue d’ensemble</span>
+								</a>
+							{/snippet}
+						</Sidebar.MenuButton>
+					</Sidebar.MenuItem>
 				</Sidebar.Menu>
+			</Sidebar.GroupContent>
+		</Sidebar.Group>
+
+		<Sidebar.Group>
+			<Sidebar.GroupLabel class="text-xs font-medium">Biens & Exploitation</Sidebar.GroupLabel>
+			<Sidebar.GroupContent>
+				{@render renderSectionItems(propertyOperationsItems)}
+			</Sidebar.GroupContent>
+		</Sidebar.Group>
+
+		<Sidebar.Group>
+			<Sidebar.GroupLabel class="text-xs font-medium">Société & Fiscalité</Sidebar.GroupLabel>
+			<Sidebar.GroupContent>
+				{@render renderSectionItems(corporateTaxItems)}
 			</Sidebar.GroupContent>
 		</Sidebar.Group>
 	</Sidebar.Content>
 
-	<Sidebar.Footer class="border-t p-3">
-		{#if user}
-			<div class="flex items-center justify-between gap-2">
-				<div class="flex min-w-0 flex-col">
-					<span class="truncate text-xs font-medium">{user.full_name}</span>
-					<span class="truncate text-[11px] text-muted-foreground">
-						{user.email} · {user.role}
-					</span>
-				</div>
-				<form method="POST" action={resolve('/(auth)/logout')} use:enhance>
-					<Button type="submit" variant="ghost" size="icon-sm" aria-label="Se déconnecter">
-						<IconLogout />
-					</Button>
-				</form>
-			</div>
-		{/if}
+	<Sidebar.Footer>
+		<SidebarUserMenu {user} />
 	</Sidebar.Footer>
+
 	<Sidebar.Rail />
 </Sidebar.Root>
