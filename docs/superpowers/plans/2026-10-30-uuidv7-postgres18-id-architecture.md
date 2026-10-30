@@ -59,38 +59,13 @@ Expected: `github.com/google/uuid v1.6.0` (or newer `v1.x`) added cleanly to `ap
 
 - [ ] **Step 2: Write failing unit tests for `id`, `secret`, and `postgres` helpers**
 
-In `api/internal/platform/id/id_test.go`, test `TestNewV7_ProducesCanonicalMonotonicUUIDv7` and `TestIsValidUUID_StrictCanonical36Char`:
+In `api/internal/platform/id/id_test.go`, test only our wrapper contract (`NewV7` returns a valid canonical string and `IsValidUUID` rejects non-canonical forms accepted by `uuid.Validate` alone):
 ```go
-func TestNewV7_ProducesCanonicalMonotonicUUIDv7(t *testing.T) {
-	seen := make(map[string]struct{}, 2000)
-	prev := ""
-	for i := 0; i < 2000; i++ {
-		got, err := id.NewV7()
-		if err != nil {
-			t.Fatalf("NewV7 failed at %d: %v", i, err)
-		}
-		if !id.IsValidUUID(got) || got != strings.ToLower(got) {
-			t.Fatalf("expected canonical lowercase UUID, got %q", got)
-		}
-		if got[14] != '7' {
-			t.Fatalf("expected RFC 9562 version '7' at index 14, got %q in %q", got[14], got)
-		}
-		if got[19] != '8' && got[19] != '9' && got[19] != 'a' && got[19] != 'b' {
-			t.Fatalf("expected RFC 9562 variant nibble at index 19, got %q in %q", got[19], got)
-		}
-		if prev != "" && got <= prev {
-			t.Fatalf("expected strict monotonic order within/across ms: prev=%q got=%q", prev, got)
-		}
-		if _, dup := seen[got]; dup {
-			t.Fatalf("duplicate UUIDv7 generated: %q", got)
-		}
-		seen[got] = struct{}{}
-		prev = got
-	}
-}
-
 func TestIsValidUUID_StrictCanonical36Char(t *testing.T) {
-	sample := id.MustNewV7()
+	sample, err := id.NewV7()
+	if err != nil {
+		t.Fatalf("NewV7 failed: %v", err)
+	}
 	noHyphens := strings.ReplaceAll(sample, "-", "")
 	cases := []struct {
 		in   string
