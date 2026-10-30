@@ -1,3 +1,5 @@
+import { parseEuroToCents } from '#lib/core/formatters/money';
+import type { LegalEntityDTO } from '#lib/modules/portfolio/types';
 import type { StatementSection } from './types';
 
 export const STATEMENT_SECTION_OPTIONS: Array<{ value: StatementSection; label: string }> = [
@@ -35,4 +37,55 @@ export function toggleDisabledLineId(currentIds: string[], lineId: string): stri
 
 export function formatStatementSectionLabel(section: StatementSection): string {
 	return SECTION_LABEL_MAP.get(section) ?? section;
+}
+
+function safeParseEuroCents(rawInput: string): { cents: number; valid: boolean } {
+	try {
+		return {
+			cents: parseEuroToCents(rawInput),
+			valid: true
+		};
+	} catch {
+		return {
+			cents: 0,
+			valid: false
+		};
+	}
+}
+
+export function evaluateJournalBalance(
+	debitEuroInput: string,
+	creditEuroInput: string
+): { debitCents: number; creditCents: number; balanced: boolean } {
+	const debit = safeParseEuroCents(debitEuroInput);
+	const credit = safeParseEuroCents(creditEuroInput);
+	return {
+		debitCents: debit.cents,
+		creditCents: credit.cents,
+		balanced: debit.valid && credit.valid && debit.cents > 0 && debit.cents === credit.cents
+	};
+}
+
+export function resolveAccountingContext(params: {
+	entities: LegalEntityDTO[];
+	selectedEntityId: string;
+	url: URL;
+}): { activeEntityId: string; fiscalYear: number } {
+	const hasMatchingEntity =
+		params.selectedEntityId !== 'ALL' &&
+		params.entities.some((entity) => entity.id === params.selectedEntityId);
+	const activeEntityId = hasMatchingEntity
+		? params.selectedEntityId
+		: (params.entities[0]?.id ?? '');
+
+	const yearParam = Number.parseInt(params.url.searchParams.get('year') ?? '', 10);
+	const fiscalYear =
+		!Number.isNaN(yearParam) && yearParam >= 2000 && yearParam <= 2100
+			? yearParam
+			: new Date().getFullYear();
+
+	return {
+		activeEntityId,
+		fiscalYear
+	};
 }
