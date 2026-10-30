@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/inspection/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -42,25 +43,35 @@ func (r *InspectionRepo) SaveInspection(ctx context.Context, insp domain.Inspect
 			inspection_date = EXCLUDED.inspection_date,
 			updated_at = EXCLUDED.updated_at
 	`
+	var entryInspectionID any
+	if insp.EntryInspectionID != nil {
+		entryInspectionID = postgres.NullableUUID(*insp.EntryInspectionID)
+	}
 	_, err := postgres.Conn(ctx, r.db).Exec(ctx, query,
 		insp.ID,
 		insp.LeaseID,
 		insp.TemplateID,
 		string(insp.Type),
-		insp.EntryInspectionID,
+		entryInspectionID,
 		insp.ReportPDFR2Key,
 		insp.InspectionDate,
 		insp.CreatedAt,
 		insp.UpdatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("inspection/postgres/inspection_repo: save inspection %s: %w", insp.ID, err)
 	}
 	return nil
 }
 
 // FindInspectionByID retrieves an Inspection and its items by ID.
-func (r *InspectionRepo) FindInspectionByID(ctx context.Context, id string) (*domain.Inspection, error) {
+func (r *InspectionRepo) FindInspectionByID(ctx context.Context, inspID string) (*domain.Inspection, error) {
+	if !id.IsValidUUID(inspID) {
+		return nil, domain.ErrInspectionNotFound
+	}
 	const query = `
 		SELECT id, lease_id, template_id, inspection_type, entry_inspection_id,
 		       report_pdf_r2_key, inspection_date, created_at, updated_at
@@ -69,7 +80,7 @@ func (r *InspectionRepo) FindInspectionByID(ctx context.Context, id string) (*do
 	`
 	var insp domain.Inspection
 	var inspType string
-	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id).Scan(
+	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, inspID).Scan(
 		&insp.ID,
 		&insp.LeaseID,
 		&insp.TemplateID,
@@ -98,6 +109,9 @@ func (r *InspectionRepo) FindInspectionByID(ctx context.Context, id string) (*do
 
 // ListInspectionsByLease returns all Inspections and their items for a lease.
 func (r *InspectionRepo) ListInspectionsByLease(ctx context.Context, leaseID string) ([]domain.Inspection, error) {
+	if !id.IsValidUUID(leaseID) {
+		return []domain.Inspection{}, nil
+	}
 	const query = `
 		SELECT id, lease_id, template_id, inspection_type, entry_inspection_id,
 		       report_pdf_r2_key, inspection_date, created_at, updated_at
@@ -157,6 +171,9 @@ func (r *InspectionRepo) ListInspectionsByLease(ctx context.Context, leaseID str
 
 // UpsertInspectionItems inserts or updates inspection items keyed by (inspection_id, room_name, element_name) atomically.
 func (r *InspectionRepo) UpsertInspectionItems(ctx context.Context, inspectionID string, items []domain.InspectionItem) error {
+	if !id.IsValidUUID(inspectionID) {
+		return domain.ErrInspectionNotFound
+	}
 	return postgres.WithinTransaction(ctx, r.pool, func(txCtx context.Context) error {
 		conn := postgres.Conn(txCtx, r.db)
 
@@ -196,10 +213,16 @@ func (r *InspectionRepo) UpsertInspectionItems(ctx context.Context, inspectionID
 			for _, item := range items {
 				if _, err := br.Exec(); err != nil {
 					_ = br.Close()
+					if postgres.IsForeignKeyViolation(err) {
+						return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+					}
 					return fmt.Errorf("inspection/postgres/inspection_repo: upsert inspection item (%s/%s): %w", item.RoomName, item.ElementName, err)
 				}
 			}
 			if err := br.Close(); err != nil {
+				if postgres.IsForeignKeyViolation(err) {
+					return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+				}
 				return fmt.Errorf("inspection/postgres/inspection_repo: close batch: %w", err)
 			}
 		}
@@ -221,13 +244,22 @@ func (r *InspectionRepo) loadInspectionItems(ctx context.Context, inspectionID s
 }
 
 func (r *InspectionRepo) loadInspectionItemsByInspectionIDs(ctx context.Context, inspectionIDs []string) (map[string][]domain.InspectionItem, error) {
+	validIDs := make([]string, 0, len(inspectionIDs))
+	for _, iid := range inspectionIDs {
+		if id.IsValidUUID(iid) {
+			validIDs = append(validIDs, iid)
+		}
+	}
+	if len(validIDs) == 0 {
+		return map[string][]domain.InspectionItem{}, nil
+	}
 	const query = `
 		SELECT id, inspection_id, room_name, element_name, condition, observation, photo_r2_keys, created_at, updated_at
 		FROM inspection_items
-		WHERE inspection_id = ANY($1)
+		WHERE inspection_id = ANY($1::uuid[])
 		ORDER BY room_name ASC, element_name ASC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, inspectionIDs)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, validIDs)
 	if err != nil {
 		return nil, fmt.Errorf("inspection/postgres/inspection_repo: load inspection items: %w", err)
 	}

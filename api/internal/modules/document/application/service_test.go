@@ -24,10 +24,21 @@ import (
 	paymentmemory "github.com/yannamsellem/gestion-immo/internal/modules/payment/infrastructure/memory"
 	portfolioapp "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/application"
 	portfoliomemory "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/infrastructure/memory"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/mcpserver"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
 )
+
+type spyObjectStorage struct {
+	r2.ObjectStorage
+	uploads int
+}
+
+func (s *spyObjectStorage) Upload(ctx context.Context, key string, contentType string, body io.Reader) error {
+	s.uploads++
+	return s.ObjectStorage.Upload(ctx, key, contentType, body)
+}
 
 func TestAssembleGLIDossier_PopulatesDocxRendersLedgerAndBundlesR2Attachments(t *testing.T) {
 	ctx := context.Background()
@@ -266,8 +277,9 @@ func TestAssembleGLIDossier_PopulatesDocxRendersLedgerAndBundlesR2Attachments(t 
 		t.Fatalf("expected HTTP 201 from /gli-dossier, got %d: %s", recHTTP.Code, recHTTP.Body.String())
 	}
 
+	adminUserID := id.MustNewV7()
 	reg := mcpserver.NewRegistry(func(_ context.Context, token string) (string, error) {
-		return "usr_admin", nil
+		return adminUserID, nil
 	})
 	docmcp.RegisterTools(reg, docSvc)
 
@@ -453,5 +465,181 @@ func TestDocumentService_SecurityAndDuplicateGLIAttachments(t *testing.T) {
 		if !entrySet[expected] {
 			t.Fatalf("expected %q in GLI archive, got %v", expected, dossier.IncludedFiles)
 		}
+	}
+}
+
+func TestDocument_UUIDv7IdentitiesGLITemplateResolutionAndScopeValidation(t *testing.T) {
+	ctx := context.Background()
+
+	entityRepo := portfoliomemory.NewLegalEntityRepo()
+	shareholderRepo := portfoliomemory.NewShareholderRepo()
+	propertyRepo := portfoliomemory.NewPropertyRepo()
+	lotRepo := portfoliomemory.NewLotRepo()
+	portfolioUoW := portfoliomemory.NewUnitOfWork(entityRepo, shareholderRepo, propertyRepo, lotRepo)
+	portfolioSvc := portfolioapp.NewService(entityRepo, shareholderRepo, propertyRepo, lotRepo, portfolioUoW)
+
+	tenantRepo := leasememory.NewTenantRepo()
+	leaseRepo := leasememory.NewLeaseRepo()
+	rentCallRepo := leasememory.NewRentCallRepo()
+	leaseUoW := leasememory.NewUnitOfWork(tenantRepo, leaseRepo, rentCallRepo)
+	leaseSvc := leaseapp.NewService(tenantRepo, leaseRepo, rentCallRepo, leaseUoW)
+
+	spyStore := &spyObjectStorage{ObjectStorage: r2.NewInMemoryStorage()}
+	pdfEngine := templating.NewInMemoryPdfEngine()
+	docxEngine := templating.NewDocxEngine()
+
+	docTemplateRepo := docmemory.NewDocumentTemplateRepo()
+	storedFileRepo := docmemory.NewStoredFileRepo()
+	gliDossierRepo := docmemory.NewGLIDossierRepo()
+	docUoW := docmemory.NewUnitOfWork(docTemplateRepo, storedFileRepo, gliDossierRepo)
+	docSvc := application.NewService(
+		docTemplateRepo,
+		storedFileRepo,
+		gliDossierRepo,
+		docUoW,
+		spyStore,
+		docxEngine,
+		pdfEngine,
+		portfolioSvc,
+		leaseSvc,
+		nil,
+	)
+	docHandler := dochttp.NewHandler(docSvc)
+
+	// 1. AttachFileToR2 rejects any non-UUID LeaseID or LegalEntityID before uploading to R2
+	for _, badID := range []string{"../secret", "a/b", "lease_1"} {
+		if _, err := docSvc.AttachFileToR2(ctx, application.AttachFileCmd{
+			LeaseID:     badID,
+			Category:    "ATTACHMENT",
+			FileName:    "test.pdf",
+			ContentType: "application/pdf",
+			Content:     []byte("%PDF-1.4 test"),
+		}); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("expected ErrValidation for LeaseID %q, got %v", badID, err)
+		}
+		if _, err := docSvc.AttachFileToR2(ctx, application.AttachFileCmd{
+			LegalEntityID: badID,
+			Category:      "ATTACHMENT",
+			FileName:      "test.pdf",
+			ContentType:   "application/pdf",
+			Content:       []byte("%PDF-1.4 test"),
+		}); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("expected ErrValidation for LegalEntityID %q, got %v", badID, err)
+		}
+	}
+	if spyStore.uploads != 0 {
+		t.Fatalf("expected 0 R2 uploads on rejected scope IDs, got %d", spyStore.uploads)
+	}
+
+	entity, err := portfolioSvc.CreateLegalEntity(ctx, portfolioapp.CreateLegalEntityCmd{
+		Name:              "SCI UUIDV7",
+		EntityType:        "SCI_IS",
+		SIRET:             "66123456700015",
+		ShareCapitalCents: 1000_00,
+		TotalShares:       100,
+	})
+	if err != nil {
+		t.Fatalf("create entity: %v", err)
+	}
+	prop, err := portfolioSvc.CreateProperty(ctx, portfolioapp.CreatePropertyCmd{
+		LegalEntityID:      entity.ID,
+		Label:              "Immeuble V7",
+		PropertyType:       "BUILDING",
+		AccountingCategory: "FIXED_ASSET",
+		AcquisitionCents:   100000_00,
+	})
+	if err != nil {
+		t.Fatalf("create property: %v", err)
+	}
+	lot, err := portfolioSvc.CreateLot(ctx, portfolioapp.CreateLotCmd{
+		PropertyID: prop.ID,
+		Label:      "Lot V7",
+		LotType:    "APARTMENT",
+		SurfaceM2:  50,
+	})
+	if err != nil {
+		t.Fatalf("create lot: %v", err)
+	}
+	tenant, err := leaseSvc.CreateTenant(ctx, leaseapp.CreateTenantCmd{
+		FullName: "Paul Martin",
+		Email:    "paul@example.fr",
+	})
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	lease, err := leaseSvc.CreateLease(ctx, leaseapp.CreateLeaseCmd{
+		LegalEntityID:   entity.ID,
+		LotID:           lot.ID,
+		TenantID:        tenant.ID,
+		LeaseType:       "RESIDENTIAL_UNFURNISHED",
+		RentNetCents:    700_00,
+		ChargesCents:    50_00,
+		GLIPolicyNumber: "GLI-V7-01",
+		StartDate:       "2026-01-01",
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+	if _, err := leaseSvc.GenerateMonthlyRentCalls(ctx, entity.ID, "2026-01"); err != nil {
+		t.Fatalf("generate rent calls: %v", err)
+	}
+
+	tpl, err := docSvc.RegisterTemplate(ctx, application.RegisterTemplateCmd{
+		Name:         "Quittance HTML",
+		TemplateType: "RENT_RECEIPT",
+		Format:       "HTML",
+		HTMLBody:     "<p>Quittance</p>",
+	})
+	if err != nil {
+		t.Fatalf("register template: %v", err)
+	}
+	if !id.IsValidUUID(tpl.ID) || tpl.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 DocumentTemplateDTO.ID, got %q", tpl.ID)
+	}
+
+	stored, err := docSvc.AttachFileToR2(ctx, application.AttachFileCmd{
+		LegalEntityID: entity.ID,
+		Category:      "TAX",
+		FileName:      "avis.pdf",
+		ContentType:   "application/pdf",
+		Content:       []byte("%PDF-1.4 AVIS"),
+	})
+	if err != nil {
+		t.Fatalf("attach file: %v", err)
+	}
+	if !id.IsValidUUID(stored.ID) || stored.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 StoredFileDTO.ID, got %q", stored.ID)
+	}
+
+	mux := http.NewServeMux()
+	docHandler.RegisterRoutes(mux)
+
+	// 2. POST /api/v1/leases/{id}/gli-dossier with {"template_id": ""} -> 201 Created with TemplateID == ""
+	reqDefault := httptest.NewRequest(http.MethodPost, "/api/v1/leases/"+lease.ID+"/gli-dossier", strings.NewReader(`{"template_id":""}`))
+	reqDefault.Header.Set("Content-Type", "application/json")
+	recDefault := httptest.NewRecorder()
+	mux.ServeHTTP(recDefault, reqDefault)
+	if recDefault.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created from /gli-dossier with empty template_id, got %d: %s", recDefault.Code, recDefault.Body.String())
+	}
+	var defaultDossier application.GLIDossierArchiveDTO
+	if err := json.Unmarshal(recDefault.Body.Bytes(), &defaultDossier); err != nil {
+		t.Fatalf("unmarshal GLI dossier: %v", err)
+	}
+	if !id.IsValidUUID(defaultDossier.ID) || defaultDossier.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 GLIDossierArchiveDTO.ID, got %q", defaultDossier.ID)
+	}
+	if defaultDossier.TemplateID != "" {
+		t.Fatalf("expected empty TemplateID when built-in default GLI template is used, got %q", defaultDossier.TemplateID)
+	}
+
+	// 3. POST /api/v1/leases/{id}/gli-dossier with valid-syntax unknown template_id -> 404 Not Found
+	unknownTplID := id.MustNewV7()
+	reqMissing := httptest.NewRequest(http.MethodPost, "/api/v1/leases/"+lease.ID+"/gli-dossier", strings.NewReader(`{"template_id":"`+unknownTplID+`"}`))
+	reqMissing.Header.Set("Content-Type", "application/json")
+	recMissing := httptest.NewRecorder()
+	mux.ServeHTTP(recMissing, reqMissing)
+	if recMissing.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found for unknown template_id UUID, got %d: %s", recMissing.Code, recMissing.Body.String())
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/document/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -32,8 +33,8 @@ func (r *StoredFileRepo) SaveStoredFile(ctx context.Context, file domain.StoredF
 	`
 	_, err := postgres.Conn(ctx, r.db).Exec(ctx, query,
 		file.ID,
-		file.LegalEntityID,
-		file.LeaseID,
+		postgres.NullableUUID(file.LegalEntityID),
+		postgres.NullableUUID(file.LeaseID),
 		file.Category,
 		file.FileName,
 		file.ContentType,
@@ -42,23 +43,30 @@ func (r *StoredFileRepo) SaveStoredFile(ctx context.Context, file domain.StoredF
 		file.CreatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("document/postgres/stored_file_repo: save stored file %s: %w", file.ID, err)
 	}
 	return nil
 }
 
 // FindStoredFileByID retrieves a StoredFile by ID.
-func (r *StoredFileRepo) FindStoredFileByID(ctx context.Context, id string) (*domain.StoredFile, error) {
+func (r *StoredFileRepo) FindStoredFileByID(ctx context.Context, fileID string) (*domain.StoredFile, error) {
+	if !id.IsValidUUID(fileID) {
+		return nil, domain.ErrStoredFileNotFound
+	}
 	const query = `
 		SELECT id, legal_entity_id, lease_id, category, file_name, content_type, r2_key, size_bytes, created_at
 		FROM stored_files
 		WHERE id = $1
 	`
 	var f domain.StoredFile
-	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id).Scan(
+	var entityID, leaseID *string
+	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, fileID).Scan(
 		&f.ID,
-		&f.LegalEntityID,
-		&f.LeaseID,
+		&entityID,
+		&leaseID,
 		&f.Category,
 		&f.FileName,
 		&f.ContentType,
@@ -72,11 +80,16 @@ func (r *StoredFileRepo) FindStoredFileByID(ctx context.Context, id string) (*do
 		}
 		return nil, fmt.Errorf("document/postgres/stored_file_repo: find stored file by id: %w", err)
 	}
+	f.LegalEntityID = postgres.DerefString(entityID)
+	f.LeaseID = postgres.DerefString(leaseID)
 	return &f, nil
 }
 
 // ListStoredFilesByLease returns all StoredFiles attached to a lease.
 func (r *StoredFileRepo) ListStoredFilesByLease(ctx context.Context, leaseID string) ([]domain.StoredFile, error) {
+	if !id.IsValidUUID(leaseID) {
+		return []domain.StoredFile{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, lease_id, category, file_name, content_type, r2_key, size_bytes, created_at
 		FROM stored_files
@@ -88,6 +101,9 @@ func (r *StoredFileRepo) ListStoredFilesByLease(ctx context.Context, leaseID str
 
 // ListStoredFilesByEntity returns all StoredFiles attached to a legal entity.
 func (r *StoredFileRepo) ListStoredFilesByEntity(ctx context.Context, entityID string) ([]domain.StoredFile, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.StoredFile{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, lease_id, category, file_name, content_type, r2_key, size_bytes, created_at
 		FROM stored_files
@@ -107,10 +123,11 @@ func (r *StoredFileRepo) queryStoredFiles(ctx context.Context, query string, arg
 	var out []domain.StoredFile
 	for rows.Next() {
 		var f domain.StoredFile
+		var entityID, leaseID *string
 		if err := rows.Scan(
 			&f.ID,
-			&f.LegalEntityID,
-			&f.LeaseID,
+			&entityID,
+			&leaseID,
 			&f.Category,
 			&f.FileName,
 			&f.ContentType,
@@ -120,6 +137,8 @@ func (r *StoredFileRepo) queryStoredFiles(ctx context.Context, query string, arg
 		); err != nil {
 			return nil, fmt.Errorf("document/postgres/stored_file_repo: scan stored file: %w", err)
 		}
+		f.LegalEntityID = postgres.DerefString(entityID)
+		f.LeaseID = postgres.DerefString(leaseID)
 		out = append(out, f)
 	}
 	return out, rows.Err()

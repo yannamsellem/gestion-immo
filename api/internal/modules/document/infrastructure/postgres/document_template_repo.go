@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/document/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -48,13 +49,19 @@ func (r *DocumentTemplateRepo) SaveTemplate(ctx context.Context, tpl domain.Docu
 		tpl.UpdatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("document/postgres/document_template_repo: save template %s: %w", tpl.ID, err)
 	}
 	return nil
 }
 
 // FindTemplateByID retrieves a DocumentTemplate by ID.
-func (r *DocumentTemplateRepo) FindTemplateByID(ctx context.Context, id string) (*domain.DocumentTemplate, error) {
+func (r *DocumentTemplateRepo) FindTemplateByID(ctx context.Context, tplID string) (*domain.DocumentTemplate, error) {
+	if !id.IsValidUUID(tplID) {
+		return nil, domain.ErrTemplateNotFound
+	}
 	const query = `
 		SELECT id, name, template_type, format, r2_key, html_body, created_at, updated_at
 		FROM document_templates
@@ -62,7 +69,7 @@ func (r *DocumentTemplateRepo) FindTemplateByID(ctx context.Context, id string) 
 	`
 	var tpl domain.DocumentTemplate
 	var tplType, format string
-	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id).Scan(
+	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, tplID).Scan(
 		&tpl.ID,
 		&tpl.Name,
 		&tplType,

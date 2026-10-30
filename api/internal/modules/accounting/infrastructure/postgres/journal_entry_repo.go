@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -54,6 +55,9 @@ func (r *JournalEntryRepo) SaveJournalEntry(ctx context.Context, entry domain.Jo
 			entry.ValidationDate,
 			entry.CreatedAt,
 		); err != nil {
+			if postgres.IsForeignKeyViolation(err) {
+				return fmt.Errorf("%w: referenced legal entity does not exist", domain.ErrValidation)
+			}
 			return fmt.Errorf("accounting/postgres/journal_entry_repo: insert journal entry %s: %w", entry.ID, err)
 		}
 
@@ -100,10 +104,16 @@ func (r *JournalEntryRepo) SaveJournalEntry(ctx context.Context, entry domain.Jo
 			for _, line := range entry.Lines {
 				if _, err := br.Exec(); err != nil {
 					_ = br.Close()
+					if postgres.IsForeignKeyViolation(err) {
+						return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+					}
 					return fmt.Errorf("accounting/postgres/journal_entry_repo: insert journal line %s: %w", line.ID, err)
 				}
 			}
 			if err := br.Close(); err != nil {
+				if postgres.IsForeignKeyViolation(err) {
+					return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+				}
 				return fmt.Errorf("accounting/postgres/journal_entry_repo: close batch: %w", err)
 			}
 		}
@@ -114,6 +124,9 @@ func (r *JournalEntryRepo) SaveJournalEntry(ctx context.Context, entry domain.Jo
 
 // ListJournalEntries returns all JournalEntries and their JournalLines for an entity and fiscal year.
 func (r *JournalEntryRepo) ListJournalEntries(ctx context.Context, entityID string, fiscalYear int) ([]domain.JournalEntry, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.JournalEntry{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, fiscal_year, journal_code, journal_label,
 		       entry_number, entry_date, document_ref, document_date, label, validation_date, created_at
@@ -173,22 +186,32 @@ func (r *JournalEntryRepo) ListJournalEntries(ctx context.Context, entityID stri
 }
 
 func (r *JournalEntryRepo) loadJournalLinesByEntryIDs(ctx context.Context, entryIDs []string) (map[string][]domain.JournalLine, error) {
+	validIDs := make([]string, 0, len(entryIDs))
+	for _, entryID := range entryIDs {
+		if id.IsValidUUID(entryID) {
+			validIDs = append(validIDs, entryID)
+		}
+	}
+	if len(validIDs) == 0 {
+		return map[string][]domain.JournalLine{}, nil
+	}
+
 	const query = `
 		SELECT id, journal_entry_id, legal_entity_id, fiscal_year, line_id,
 		       account_code, account_label, sub_account_code, sub_account_label, section, label,
 		       debit_cents, credit_cents, net_n_minus_1_cents, reconciliation_code, reconciliation_date,
 		       foreign_currency_amount_cents, currency_code, created_at
 		FROM journal_lines
-		WHERE journal_entry_id = ANY($1)
+		WHERE journal_entry_id = ANY($1::uuid[])
 		ORDER BY id ASC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, entryIDs)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, validIDs)
 	if err != nil {
 		return nil, fmt.Errorf("accounting/postgres/journal_entry_repo: load journal lines: %w", err)
 	}
 	defer rows.Close()
 
-	grouped := make(map[string][]domain.JournalLine, len(entryIDs))
+	grouped := make(map[string][]domain.JournalLine, len(validIDs))
 	for rows.Next() {
 		var l domain.JournalLine
 		var debit, credit, nMinus1, foreignCurr int64
@@ -226,6 +249,9 @@ func (r *JournalEntryRepo) loadJournalLinesByEntryIDs(ctx context.Context, entry
 
 // ListFECEntries returns all 18-column FEC entries for an entity and fiscal year ordered chronologically.
 func (r *JournalEntryRepo) ListFECEntries(ctx context.Context, entityID string, fiscalYear int) ([]domain.FECEntry, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.FECEntry{}, nil
+	}
 	const query = `
 		SELECT e.journal_code, e.journal_label, e.entry_number, e.entry_date,
 		       l.account_code, l.account_label, l.sub_account_code, l.sub_account_label,

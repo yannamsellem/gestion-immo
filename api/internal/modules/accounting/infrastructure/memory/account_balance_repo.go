@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 )
 
 // AccountBalanceRepo is a thread-safe in-memory implementation of domain.AccountBalanceRepository for tests.
@@ -28,20 +29,34 @@ func balanceKey(entityID string, fiscalYear int) string {
 
 // UpsertAccountBalanceLines inserts or updates account balance lines in memory.
 func (r *AccountBalanceRepo) UpsertAccountBalanceLines(_ context.Context, entityID string, fiscalYear int, lines []domain.AccountBalanceLine) error {
+	trimmedEntity := strings.TrimSpace(entityID)
+	if !id.IsValidUUID(trimmedEntity) {
+		return fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := balanceKey(entityID, fiscalYear)
+	key := balanceKey(trimmedEntity, fiscalYear)
 	existing := r.balanceLines[key]
 	idxByLineID := make(map[string]int, len(existing))
 	for i, l := range existing {
 		idxByLineID[l.LineID] = i
 	}
 	for _, line := range lines {
-		line.LegalEntityID = entityID
+		line.LegalEntityID = trimmedEntity
 		line.FiscalYear = fiscalYear
 		if pos, ok := idxByLineID[line.LineID]; ok {
+			if strings.TrimSpace(line.ID) == "" {
+				line.ID = existing[pos].ID
+			}
 			existing[pos] = line
 		} else {
+			if strings.TrimSpace(line.ID) == "" {
+				newID, err := id.NewV7()
+				if err != nil {
+					return err
+				}
+				line.ID = newID
+			}
 			idxByLineID[line.LineID] = len(existing)
 			existing = append(existing, line)
 		}
@@ -52,9 +67,13 @@ func (r *AccountBalanceRepo) UpsertAccountBalanceLines(_ context.Context, entity
 
 // ListAccountBalanceLines returns all AccountBalanceLines for an entity and fiscal year.
 func (r *AccountBalanceRepo) ListAccountBalanceLines(_ context.Context, entityID string, fiscalYear int) ([]domain.AccountBalanceLine, error) {
+	trimmedEntity := strings.TrimSpace(entityID)
+	if !id.IsValidUUID(trimmedEntity) {
+		return []domain.AccountBalanceLine{}, nil
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	key := balanceKey(entityID, fiscalYear)
+	key := balanceKey(trimmedEntity, fiscalYear)
 	list := r.balanceLines[key]
 	out := make([]domain.AccountBalanceLine, len(list))
 	copy(out, list)

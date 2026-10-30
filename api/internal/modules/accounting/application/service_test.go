@@ -18,12 +18,24 @@ import (
 	acchttp "github.com/yannamsellem/gestion-immo/internal/modules/accounting/interfaces/http"
 	accmcp "github.com/yannamsellem/gestion-immo/internal/modules/accounting/interfaces/mcp"
 	portfolioapp "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/application"
+	portfoliodomain "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
 	portfoliomem "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/infrastructure/memory"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/mcpserver"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
 )
+
+type spyObjectStorage struct {
+	r2.ObjectStorage
+	uploads int
+}
+
+func (s *spyObjectStorage) Upload(ctx context.Context, key string, contentType string, body io.Reader) error {
+	s.uploads++
+	return s.ObjectStorage.Upload(ctx, key, contentType, body)
+}
 
 type spyAccountBalanceRepo struct {
 	domain.AccountBalanceRepository
@@ -68,10 +80,11 @@ func newTestAccountingService(portfolioSvc application.PortfolioPort) (*applicat
 func TestRecordJournalEntry_RejectsUnbalancedAndSingleLineEntries(t *testing.T) {
 	svc, _, _ := newTestAccountingService(nil)
 	ctx := context.Background()
+	entityID := id.MustNewV7()
 
 	// Fewer than 2 lines must return ErrValidation
 	_, err := svc.RecordJournalEntry(ctx, application.RecordJournalEntryCmd{
-		LegalEntityID: "ent_val_1",
+		LegalEntityID: entityID,
 		FiscalYear:    2025,
 		Label:         "Single line entry",
 		Lines: []application.JournalLineInput{
@@ -84,7 +97,7 @@ func TestRecordJournalEntry_RejectsUnbalancedAndSingleLineEntries(t *testing.T) 
 
 	// Unbalanced debit != credit must return ErrUnbalancedJournalEntry
 	_, err = svc.RecordJournalEntry(ctx, application.RecordJournalEntryCmd{
-		LegalEntityID: "ent_val_1",
+		LegalEntityID: entityID,
 		FiscalYear:    2025,
 		Label:         "Unbalanced entry",
 		Lines: []application.JournalLineInput{
@@ -100,13 +113,13 @@ func TestRecordJournalEntry_RejectsUnbalancedAndSingleLineEntries(t *testing.T) 
 func TestRecordJournalEntry_UpdatesSeededAccountByAccountCodeAndDeduplicatesUpserts(t *testing.T) {
 	svc, balancesSpy, _ := newTestAccountingService(nil)
 	ctx := context.Background()
-	entityID := "ent_sync_1"
+	entityID := id.MustNewV7()
 	fiscalYear := 2025
 
 	// Seed an existing AccountBalanceLine with LineID "rev_locaux" on AccountCode "706100"
 	err := svc.UpsertAccountBalanceLines(ctx, entityID, fiscalYear, []domain.AccountBalanceLine{
 		{
-			ID:              entityID + "_rev_locaux",
+			ID:              id.MustNewV7(),
 			LegalEntityID:   entityID,
 			FiscalYear:      fiscalYear,
 			LineID:          "rev_locaux",
@@ -171,7 +184,7 @@ func TestRecordJournalEntry_UpdatesSeededAccountByAccountCodeAndDeduplicatesUpse
 func TestPreviewFinancialStatements_DisabledLinesRecalculateTotals(t *testing.T) {
 	svc, _, _ := newTestAccountingService(nil)
 	ctx := context.Background()
-	entityID := "ent_preview_1"
+	entityID := id.MustNewV7()
 	fiscalYear := 2025
 
 	if err := svc.UpsertAccountBalanceLines(ctx, entityID, fiscalYear, []domain.AccountBalanceLine{
@@ -259,7 +272,7 @@ func TestGenerateAnnualAccountsPDF_UsesLivePortfolioMetadataAndUploadsToR2(t *te
 func TestExportEntityFEC_ProducesNormative18ColumnTSV(t *testing.T) {
 	svc, _, _ := newTestAccountingService(nil)
 	ctx := context.Background()
-	entityID := "ent_fec_1"
+	entityID := id.MustNewV7()
 
 	_, err := svc.RecordJournalEntry(ctx, application.RecordJournalEntryCmd{
 		LegalEntityID:  entityID,
@@ -385,9 +398,10 @@ func TestAccountingHTTPAndMCPInterfaces(t *testing.T) {
 	}
 
 	// 7. Verify all 6 MCP tools (`record_journal_entry`, `record_expense_invoice`, `get_trial_balance`, `preview_financial_statement`, `generate_annual_accounts_pdf`, `export_fec`)
+	mcpUserID := id.MustNewV7()
 	reg := mcpserver.NewRegistry(func(_ context.Context, token string) (string, error) {
 		if token == "valid" {
-			return "usr_1", nil
+			return mcpUserID, nil
 		}
 		return "", errors.New("unauthorized")
 	})
@@ -455,5 +469,129 @@ func TestAccountingHTTPAndMCPInterfaces(t *testing.T) {
 		if recMCP.Code != http.StatusOK || !strings.Contains(recMCP.Body.String(), tc.expect) {
 			t.Fatalf("unexpected MCP response for %s (%d): %s", tc.toolName, recMCP.Code, recMCP.Body.String())
 		}
+	}
+}
+
+func TestAccounting_UUIDv7IdentitiesPreservedSlugsAndPreUploadEntityCheck(t *testing.T) {
+	ctx := context.Background()
+	portfolioSvc := newTestPortfolioService()
+
+	journalEntries := memory.NewJournalEntryRepo()
+	accountBalances := memory.NewAccountBalanceRepo()
+	annualReports := memory.NewAnnualAccountReportRepo()
+	uow := memory.NewUnitOfWork(journalEntries, accountBalances, annualReports)
+	spyStore := &spyObjectStorage{ObjectStorage: r2.NewInMemoryStorage()}
+	pdfEngine := templating.NewInMemoryPdfEngine()
+	svc := application.NewService(
+		journalEntries,
+		accountBalances,
+		annualReports,
+		uow,
+		spyStore,
+		pdfEngine,
+		infrastructure.NewFECExporter(),
+		infrastructure.NewAnnualAccountsPDFRenderer(pdfEngine),
+		portfolioSvc,
+	)
+	handler := acchttp.NewHandler(svc)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	// 1. Unknown valid UUIDv7 entityID -> ErrLegalEntityNotFound (HTTP 404) & zero R2 uploads
+	unknownEntityID := id.MustNewV7()
+	if _, err := svc.GenerateAnnualAccountsPDF(ctx, unknownEntityID, 2025, nil); !errors.Is(err, portfoliodomain.ErrLegalEntityNotFound) {
+		t.Fatalf("expected ErrLegalEntityNotFound on unknown entityID, got %v", err)
+	}
+	if spyStore.uploads != 0 {
+		t.Fatalf("expected 0 R2 uploads when entity does not exist, got %d", spyStore.uploads)
+	}
+
+	reqUnknownPDF := httptest.NewRequest(http.MethodPost, "/api/v1/entities/"+unknownEntityID+"/statements/pdf", strings.NewReader(`{"fiscal_year":2025}`))
+	reqUnknownPDF.Header.Set("Content-Type", "application/json")
+	recUnknownPDF := httptest.NewRecorder()
+	mux.ServeHTTP(recUnknownPDF, reqUnknownPDF)
+	if recUnknownPDF.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found from POST statements/pdf for unknown entity, got %d: %s", recUnknownPDF.Code, recUnknownPDF.Body.String())
+	}
+	if spyStore.uploads != 0 {
+		t.Fatalf("expected 0 R2 uploads after HTTP 404 on unknown entity, got %d", spyStore.uploads)
+	}
+
+	// 2. Malformed entityID -> ErrValidation
+	if _, err := svc.RecordJournalEntry(ctx, application.RecordJournalEntryCmd{
+		LegalEntityID: "not-a-uuid",
+		FiscalYear:    2025,
+		Label:         "Invalid entity",
+		Lines: []application.JournalLineInput{
+			{AccountCode: "512000", DebitCents: 100_00},
+			{AccountCode: "706100", CreditCents: 100_00},
+		},
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed LegalEntityID, got %v", err)
+	}
+
+	// 3. Valid entity -> UUIDv7 IDs on AccountBalanceLine, JournalEntryDTO, JournalLineDTO, AnnualAccountReportDTO; slugs preserved
+	ent, err := portfolioSvc.CreateLegalEntity(ctx, portfolioapp.CreateLegalEntityCmd{
+		Name:              "SCI UUIDV7 COMPTA",
+		EntityType:        "SCI_IS",
+		SIRET:             "77123456700018",
+		ShareCapitalCents: 10000_00,
+		TotalShares:       100,
+	})
+	if err != nil {
+		t.Fatalf("create entity: %v", err)
+	}
+
+	if err := svc.UpsertAccountBalanceLines(ctx, ent.ID, 2025, []domain.AccountBalanceLine{
+		{LineID: "rev_locaux", AccountCode: "706100", Label: "LOCATIONS", Section: "OPERATING_REVENUE", NetNCents: 50000_00},
+		{LineID: "chg_loc", AccountCode: "614000", Label: "CHARGES", Section: "EXTERNAL_EXPENSES", NetNCents: 10000_00},
+	}); err != nil {
+		t.Fatalf("UpsertAccountBalanceLines: %v", err)
+	}
+	storedLines, err := accountBalances.ListAccountBalanceLines(ctx, ent.ID, 2025)
+	if err != nil || len(storedLines) != 2 {
+		t.Fatalf("ListAccountBalanceLines: got %d (%v)", len(storedLines), err)
+	}
+	for _, l := range storedLines {
+		if !id.IsValidUUID(l.ID) || l.ID[14] != '7' {
+			t.Fatalf("expected UUIDv7 AccountBalanceLine.ID, got %q", l.ID)
+		}
+	}
+
+	entry, err := svc.RecordJournalEntry(ctx, application.RecordJournalEntryCmd{
+		LegalEntityID: ent.ID,
+		FiscalYear:    2025,
+		JournalCode:   "VT",
+		EntryDate:     "2025-04-01",
+		Label:         "Loyer avril",
+		Lines: []application.JournalLineInput{
+			{LineID: "banque_512", AccountCode: "512000", AccountLabel: "Banque", DebitCents: 1000_00},
+			{LineID: "rev_locaux", AccountCode: "706100", AccountLabel: "Locations", CreditCents: 1000_00},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RecordJournalEntry: %v", err)
+	}
+	if !id.IsValidUUID(entry.ID) || entry.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 JournalEntryDTO.ID, got %q", entry.ID)
+	}
+	for _, jl := range entry.Lines {
+		if !id.IsValidUUID(jl.ID) || jl.ID[14] != '7' {
+			t.Fatalf("expected UUIDv7 JournalLineDTO.ID, got %q", jl.ID)
+		}
+	}
+	if entry.Lines[1].LineID != "rev_locaux" {
+		t.Fatalf("expected JournalLineDTO.LineID slug 'rev_locaux' preserved, got %q", entry.Lines[1].LineID)
+	}
+
+	report, err := svc.GenerateAnnualAccountsPDF(ctx, ent.ID, 2025, []string{"chg_loc"})
+	if err != nil {
+		t.Fatalf("GenerateAnnualAccountsPDF: %v", err)
+	}
+	if !id.IsValidUUID(report.ID) || report.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 AnnualAccountReportDTO.ID, got %q", report.ID)
+	}
+	if len(report.DisabledLineIDs) != 1 || report.DisabledLineIDs[0] != "chg_loc" {
+		t.Fatalf("expected DisabledLineIDs slug ['chg_loc'] preserved, got %v", report.DisabledLineIDs)
 	}
 }

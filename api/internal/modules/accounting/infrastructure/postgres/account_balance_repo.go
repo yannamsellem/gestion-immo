@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -28,6 +29,9 @@ func NewAccountBalanceRepo(pool *pgxpool.Pool, db postgres.DBTX) *AccountBalance
 
 // UpsertAccountBalanceLines inserts or updates account balance lines for a legal entity and fiscal year atomically.
 func (r *AccountBalanceRepo) UpsertAccountBalanceLines(ctx context.Context, entityID string, fiscalYear int, lines []domain.AccountBalanceLine) error {
+	if !id.IsValidUUID(entityID) {
+		return fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
+	}
 	if len(lines) == 0 {
 		return nil
 	}
@@ -58,12 +62,18 @@ func (r *AccountBalanceRepo) UpsertAccountBalanceLines(ctx context.Context, enti
 		`
 		batch := &pgx.Batch{}
 		for _, line := range lines {
-			id := line.ID
-			if id == "" {
-				id = fmt.Sprintf("%s_%d_%s", entityID, fiscalYear, line.LineID)
+			lineUUID := line.ID
+			if lineUUID == "" {
+				var err error
+				lineUUID, err = id.NewV7()
+				if err != nil {
+					return err
+				}
+			} else if !id.IsValidUUID(lineUUID) {
+				return fmt.Errorf("%w: invalid account balance line id", domain.ErrValidation)
 			}
 			batch.Queue(query,
-				id,
+				lineUUID,
 				entityID,
 				fiscalYear,
 				line.LineID,
@@ -82,10 +92,16 @@ func (r *AccountBalanceRepo) UpsertAccountBalanceLines(ctx context.Context, enti
 		for _, line := range lines {
 			if _, err := br.Exec(); err != nil {
 				_ = br.Close()
+				if postgres.IsForeignKeyViolation(err) {
+					return fmt.Errorf("%w: referenced legal entity does not exist", domain.ErrValidation)
+				}
 				return fmt.Errorf("accounting/postgres/account_balance_repo: upsert account balance line %s: %w", line.LineID, err)
 			}
 		}
 		if err := br.Close(); err != nil {
+			if postgres.IsForeignKeyViolation(err) {
+				return fmt.Errorf("%w: referenced legal entity does not exist", domain.ErrValidation)
+			}
 			return fmt.Errorf("accounting/postgres/account_balance_repo: close batch: %w", err)
 		}
 
@@ -95,6 +111,9 @@ func (r *AccountBalanceRepo) UpsertAccountBalanceLines(ctx context.Context, enti
 
 // ListAccountBalanceLines retrieves all AccountBalanceLines for a legal entity and fiscal year.
 func (r *AccountBalanceRepo) ListAccountBalanceLines(ctx context.Context, entityID string, fiscalYear int) ([]domain.AccountBalanceLine, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.AccountBalanceLine{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, fiscal_year, line_id, account_code, label,
 		       section, cerfa_code, gross_n_cents, depreciation_n_cents, net_n_cents, net_n_minus_1_cents

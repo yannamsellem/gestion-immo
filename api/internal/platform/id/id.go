@@ -1,8 +1,6 @@
 package id
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -35,13 +33,4 @@ func IsValidUUID(s string) bool {
 		return false
 	}
 	return uuid.Validate(s) == nil
-}
-
-// Deprecated: Generate is retained temporarily during the UUIDv7 module migration and removed in Task 5.
-func Generate(prefix string) (string, error) {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("id: failed to generate random id: %w", err)
-	}
-	return fmt.Sprintf("%s_%s", prefix, hex.EncodeToString(bytes)), nil
 }

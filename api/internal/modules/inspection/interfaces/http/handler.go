@@ -39,7 +39,7 @@ type inspectionTemplateListOutput struct {
 }
 
 type idInput struct {
-	ID string `path:"id"`
+	ID string `path:"id" format:"uuid"`
 }
 
 type createInspectionInput struct {
@@ -64,7 +64,7 @@ type UpsertInspectionItemsBody struct {
 }
 
 type upsertInspectionItemsInput struct {
-	ID      string `path:"id"`
+	ID      string `path:"id" format:"uuid"`
 	RawBody []byte
 }
 
@@ -82,7 +82,7 @@ type listIncidentsInput struct {
 }
 
 type updateIncidentInput struct {
-	ID   string `path:"id"`
+	ID   string `path:"id" format:"uuid"`
 	Body application.UpdateIncidentCmd
 }
 

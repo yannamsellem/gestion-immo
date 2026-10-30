@@ -15,6 +15,7 @@ import (
 	"github.com/yannamsellem/gestion-immo/internal/modules/inspection/infrastructure/memory"
 	insphttp "github.com/yannamsellem/gestion-immo/internal/modules/inspection/interfaces/http"
 	inspmcp "github.com/yannamsellem/gestion-immo/internal/modules/inspection/interfaces/mcp"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/mcpserver"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
@@ -37,9 +38,10 @@ func TestGenerateExitInspection_WithoutStructuredEntryInspectionSucceeds(t *test
 		t.Fatal(err)
 	}
 
+	legacyLeaseID := id.MustNewV7()
 	// Exit inspection created for a legacy lease that has NO structured entry inspection (EntryInspectionID == nil)
 	exitInsp, err := svc.CreateInspection(ctx, application.CreateInspectionCmd{
-		LeaseID:           "lease_legacy_1",
+		LeaseID:           legacyLeaseID,
 		TemplateID:        tpl.ID,
 		Type:              "MOVE_OUT",
 		EntryInspectionID: nil,
@@ -49,7 +51,7 @@ func TestGenerateExitInspection_WithoutStructuredEntryInspectionSucceeds(t *test
 	}
 
 	updated, err := svc.UpsertInspectionItems(ctx, exitInsp.ID, []application.InspectionItemInput{
-		{RoomName: "Séjour", ElementName: "Parquet", Condition: "POOR", Observation: "Rayures profondes près de la baie vitrée", PhotoR2Keys: []string{"edl/lease_legacy_1/sejour_1.jpg"}},
+		{RoomName: "Séjour", ElementName: "Parquet", Condition: "POOR", Observation: "Rayures profondes près de la baie vitrée", PhotoR2Keys: []string{"edl/" + legacyLeaseID + "/sejour_1.jpg"}},
 	})
 	if err != nil || len(updated.Items) != 1 {
 		t.Fatalf("expected 1 inspection item, got %+v (err=%v)", updated, err)
@@ -81,8 +83,13 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 		t.Fatalf("create template: %v", err)
 	}
 
+	leaseID := id.MustNewV7()
+	otherLeaseID := id.MustNewV7()
+	propID := id.MustNewV7()
+	lotID := id.MustNewV7()
+
 	entryInsp, err := svc.CreateInspection(ctx, application.CreateInspectionCmd{
-		LeaseID:        "lease_t3_2025",
+		LeaseID:        leaseID,
 		TemplateID:     tpl.ID,
 		Type:           string(domain.InspectionTypeMoveIn),
 		InspectionDate: "2025-01-15",
@@ -103,7 +110,7 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 
 	// Reject entry_inspection_id on MOVE_IN inspection
 	if _, err := svc.CreateInspection(ctx, application.CreateInspectionCmd{
-		LeaseID:           "lease_t3_2025",
+		LeaseID:           leaseID,
 		TemplateID:        tpl.ID,
 		Type:              string(domain.InspectionTypeMoveIn),
 		EntryInspectionID: &entryID,
@@ -113,7 +120,7 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 
 	// Reject entry_inspection_id belonging to a different lease
 	if _, err := svc.CreateInspection(ctx, application.CreateInspectionCmd{
-		LeaseID:           "lease_other_999",
+		LeaseID:           otherLeaseID,
 		TemplateID:        tpl.ID,
 		Type:              string(domain.InspectionTypeMoveOut),
 		EntryInspectionID: &entryID,
@@ -122,7 +129,7 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 	}
 
 	exitInsp, err := svc.CreateInspection(ctx, application.CreateInspectionCmd{
-		LeaseID:           "lease_t3_2025",
+		LeaseID:           leaseID,
 		TemplateID:        tpl.ID,
 		Type:              string(domain.InspectionTypeMoveOut),
 		EntryInspectionID: &entryID,
@@ -191,9 +198,9 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 	}
 
 	incPayload, _ := json.Marshal(application.CreateIncidentCmd{
-		PropertyID:         "prop_1",
-		LotID:              "lot_1",
-		LeaseID:            "lease_t3_2025",
+		PropertyID:         propID,
+		LotID:              lotID,
+		LeaseID:            leaseID,
 		Title:              "Dégât des eaux salle de bain",
 		EstimatedCostCents: 1250_00,
 		Observations:       []string{"Fuite joint colonne montante"},
@@ -215,8 +222,9 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 	}
 
 	// Update incident via MCP tool update_incident
+	adminUserID := id.MustNewV7()
 	reg := mcpserver.NewRegistry(func(_ context.Context, _ string) (string, error) {
-		return "usr_admin", nil
+		return adminUserID, nil
 	})
 	inspmcp.RegisterTools(reg, svc)
 
@@ -243,5 +251,93 @@ func TestGenerateExitInspection_WithStructuredEntryComparisonAndIncidents(t *tes
 	reg.ServeHTTP(recMCP, reqMCP)
 	if recMCP.Code != http.StatusOK || !strings.Contains(recMCP.Body.String(), "SIN-AXA-2026-7741") {
 		t.Fatalf("unexpected MCP update_incident response (%d): %s", recMCP.Code, recMCP.Body.String())
+	}
+}
+
+func TestInspection_UUIDv7IdentitiesAndOptionalIncidentScopeValidation(t *testing.T) {
+	ctx := context.Background()
+	templates := memory.NewInspectionTemplateRepo()
+	inspections := memory.NewInspectionRepo()
+	incidents := memory.NewIncidentRepo()
+	uow := memory.NewUnitOfWork(templates, inspections, incidents)
+	svc := application.NewService(templates, inspections, incidents, uow, r2.NewInMemoryStorage(), templating.NewInMemoryPdfEngine())
+	handler := insphttp.NewHandler(svc)
+
+	tpl, err := svc.CreateTemplate(ctx, application.CreateInspectionTemplateCmd{
+		Name:  "T1 Studio",
+		Rooms: []string{"Pièce principale"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTemplate: %v", err)
+	}
+	if !id.IsValidUUID(tpl.ID) || tpl.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 InspectionTemplateDTO.ID, got %q", tpl.ID)
+	}
+
+	leaseID := id.MustNewV7()
+	insp, err := svc.CreateInspection(ctx, application.CreateInspectionCmd{
+		LeaseID:    leaseID,
+		TemplateID: tpl.ID,
+		Type:       "MOVE_IN",
+	})
+	if err != nil {
+		t.Fatalf("CreateInspection: %v", err)
+	}
+	if !id.IsValidUUID(insp.ID) || insp.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 InspectionDTO.ID, got %q", insp.ID)
+	}
+
+	updated, err := svc.UpsertInspectionItems(ctx, insp.ID, []application.InspectionItemInput{
+		{RoomName: "Pièce principale", ElementName: "Sol", Condition: "GOOD"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertInspectionItems: %v", err)
+	}
+	if len(updated.Items) != 1 || !id.IsValidUUID(updated.Items[0].ID) || updated.Items[0].ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 InspectionItemDTO.ID, got %+v", updated.Items)
+	}
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	// POST /api/v1/incidents with omitted lot_id/lease_id ("") succeeds (201)
+	propID := id.MustNewV7()
+	reqCreate := httptest.NewRequest(http.MethodPost, "/api/v1/incidents", strings.NewReader(`{"property_id":"`+propID+`","title":"Fuite toiture"}`))
+	reqCreate.Header.Set("Content-Type", "application/json")
+	recCreate := httptest.NewRecorder()
+	mux.ServeHTTP(recCreate, reqCreate)
+	if recCreate.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for incident with omitted lot_id/lease_id, got %d: %s", recCreate.Code, recCreate.Body.String())
+	}
+	var incDTO application.IncidentDTO
+	if err := json.Unmarshal(recCreate.Body.Bytes(), &incDTO); err != nil {
+		t.Fatalf("unmarshal IncidentDTO: %v", err)
+	}
+	if !id.IsValidUUID(incDTO.ID) || incDTO.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 IncidentDTO.ID, got %q", incDTO.ID)
+	}
+
+	// GET /api/v1/incidents without query filters succeeds (200)
+	reqList := httptest.NewRequest(http.MethodGet, "/api/v1/incidents", nil)
+	recList := httptest.NewRecorder()
+	mux.ServeHTTP(recList, reqList)
+	if recList.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from GET /api/v1/incidents without filters, got %d: %s", recList.Code, recList.Body.String())
+	}
+
+	// Non-empty malformed property_id or lease_id returns 422
+	reqBadBody := httptest.NewRequest(http.MethodPost, "/api/v1/incidents", strings.NewReader(`{"property_id":"not-a-uuid","title":"Bad"}`))
+	reqBadBody.Header.Set("Content-Type", "application/json")
+	recBadBody := httptest.NewRecorder()
+	mux.ServeHTTP(recBadBody, reqBadBody)
+	if recBadBody.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for malformed property_id on POST /api/v1/incidents, got %d: %s", recBadBody.Code, recBadBody.Body.String())
+	}
+
+	reqBadQuery := httptest.NewRequest(http.MethodGet, "/api/v1/incidents?lease_id=not-a-uuid", nil)
+	recBadQuery := httptest.NewRecorder()
+	mux.ServeHTTP(recBadQuery, reqBadQuery)
+	if recBadQuery.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for malformed lease_id query on GET /api/v1/incidents, got %d: %s", recBadQuery.Code, recBadQuery.Body.String())
 	}
 }

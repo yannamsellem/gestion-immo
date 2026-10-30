@@ -16,6 +16,7 @@ import (
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/application"
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
+	portfoliodomain "github.com/yannamsellem/gestion-immo/internal/modules/portfolio/domain"
 	"github.com/yannamsellem/gestion-immo/internal/platform/httpx"
 )
 
@@ -31,7 +32,7 @@ func NewHandler(svc *application.Service) *Handler {
 }
 
 type recordJournalEntryInput struct {
-	ID   string `path:"id"`
+	ID   string `path:"id" format:"uuid"`
 	Body application.RecordJournalEntryCmd
 }
 
@@ -40,7 +41,7 @@ type journalEntryOutput struct {
 }
 
 type listJournalEntriesInput struct {
-	ID         string `path:"id"`
+	ID         string `path:"id" format:"uuid"`
 	FiscalYear string `query:"fiscal_year" required:"false"`
 }
 
@@ -55,7 +56,7 @@ type UpsertBalanceLinesBody struct {
 }
 
 type upsertBalanceLinesInput struct {
-	ID         string `path:"id"`
+	ID         string `path:"id" format:"uuid"`
 	FiscalYear string `query:"fiscal_year" required:"false"`
 	Body       UpsertBalanceLinesBody
 }
@@ -67,7 +68,7 @@ type StatementsRequestBody struct {
 }
 
 type statementsActionInput struct {
-	ID         string `path:"id"`
+	ID         string `path:"id" format:"uuid"`
 	FiscalYear string `query:"fiscal_year" required:"false"`
 	RawBody    []byte
 }
@@ -81,7 +82,7 @@ type annualAccountsPDFOutput struct {
 }
 
 type exportFECInput struct {
-	ID         string `path:"id"`
+	ID         string `path:"id" format:"uuid"`
 	FiscalYear string `query:"fiscal_year" required:"false"`
 }
 
@@ -313,7 +314,8 @@ func mapDomainError(err error) error {
 		errors.Is(err, domain.ErrUnbalancedJournalEntry):
 		return httpx.StatusError(http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, domain.ErrJournalEntryNotFound),
-		errors.Is(err, domain.ErrReportNotFound):
+		errors.Is(err, domain.ErrReportNotFound),
+		errors.Is(err, portfoliodomain.ErrLegalEntityNotFound):
 		return httpx.StatusError(http.StatusNotFound, err.Error())
 	default:
 		return httpx.StatusError(http.StatusInternalServerError, "internal accounting error")

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/inspection/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -52,9 +54,9 @@ func (r *IncidentRepo) SaveIncident(ctx context.Context, inc domain.Incident) er
 	}
 	_, err := postgres.Conn(ctx, r.db).Exec(ctx, query,
 		inc.ID,
-		inc.PropertyID,
-		inc.LotID,
-		inc.LeaseID,
+		postgres.NullableUUID(inc.PropertyID),
+		postgres.NullableUUID(inc.LotID),
+		postgres.NullableUUID(inc.LeaseID),
 		inc.Title,
 		string(inc.Status),
 		inc.InsuranceClaimNumber,
@@ -66,13 +68,19 @@ func (r *IncidentRepo) SaveIncident(ctx context.Context, inc domain.Incident) er
 		inc.UpdatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("inspection/postgres/incident_repo: save incident %s: %w", inc.ID, err)
 	}
 	return nil
 }
 
 // FindIncidentByID retrieves an Incident by ID.
-func (r *IncidentRepo) FindIncidentByID(ctx context.Context, id string) (*domain.Incident, error) {
+func (r *IncidentRepo) FindIncidentByID(ctx context.Context, incID string) (*domain.Incident, error) {
+	if !id.IsValidUUID(incID) {
+		return nil, domain.ErrIncidentNotFound
+	}
 	const query = `
 		SELECT id, property_id, lot_id, lease_id, title, status,
 		       insurance_claim_number, estimated_cost_cents, observations, photo_r2_keys,
@@ -81,13 +89,14 @@ func (r *IncidentRepo) FindIncidentByID(ctx context.Context, id string) (*domain
 		WHERE id = $1
 	`
 	var inc domain.Incident
+	var propID, lotID, leaseID *string
 	var status string
 	var costCents int64
-	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id).Scan(
+	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, incID).Scan(
 		&inc.ID,
-		&inc.PropertyID,
-		&inc.LotID,
-		&inc.LeaseID,
+		&propID,
+		&lotID,
+		&leaseID,
 		&inc.Title,
 		&status,
 		&inc.InsuranceClaimNumber,
@@ -104,6 +113,9 @@ func (r *IncidentRepo) FindIncidentByID(ctx context.Context, id string) (*domain
 		}
 		return nil, fmt.Errorf("inspection/postgres/incident_repo: find incident by id: %w", err)
 	}
+	inc.PropertyID = postgres.DerefString(propID)
+	inc.LotID = postgres.DerefString(lotID)
+	inc.LeaseID = postgres.DerefString(leaseID)
 	inc.Status = domain.IncidentStatus(status)
 	inc.EstimatedCostCents = money.AmountCents(costCents)
 	return &inc, nil
@@ -111,16 +123,21 @@ func (r *IncidentRepo) FindIncidentByID(ctx context.Context, id string) (*domain
 
 // ListIncidents lists Incidents filtered optionally by propertyID and/or leaseID.
 func (r *IncidentRepo) ListIncidents(ctx context.Context, propertyID, leaseID string) ([]domain.Incident, error) {
+	trimmedProp := strings.TrimSpace(propertyID)
+	trimmedLease := strings.TrimSpace(leaseID)
+	if (trimmedProp != "" && !id.IsValidUUID(trimmedProp)) || (trimmedLease != "" && !id.IsValidUUID(trimmedLease)) {
+		return []domain.Incident{}, nil
+	}
 	const query = `
 		SELECT id, property_id, lot_id, lease_id, title, status,
 		       insurance_claim_number, estimated_cost_cents, observations, photo_r2_keys,
 		       occurred_at, created_at, updated_at
 		FROM incidents
-		WHERE ($1 = '' OR property_id = $1)
-		  AND ($2 = '' OR lease_id = $2)
+		WHERE ($1::uuid IS NULL OR property_id = $1)
+		  AND ($2::uuid IS NULL OR lease_id = $2)
 		ORDER BY occurred_at DESC, created_at DESC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, propertyID, leaseID)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, postgres.NullableUUID(trimmedProp), postgres.NullableUUID(trimmedLease))
 	if err != nil {
 		return nil, fmt.Errorf("inspection/postgres/incident_repo: list incidents: %w", err)
 	}
@@ -129,13 +146,14 @@ func (r *IncidentRepo) ListIncidents(ctx context.Context, propertyID, leaseID st
 	var out []domain.Incident
 	for rows.Next() {
 		var inc domain.Incident
+		var propID, lotID, lseID *string
 		var status string
 		var costCents int64
 		if err := rows.Scan(
 			&inc.ID,
-			&inc.PropertyID,
-			&inc.LotID,
-			&inc.LeaseID,
+			&propID,
+			&lotID,
+			&lseID,
 			&inc.Title,
 			&status,
 			&inc.InsuranceClaimNumber,
@@ -148,6 +166,9 @@ func (r *IncidentRepo) ListIncidents(ctx context.Context, propertyID, leaseID st
 		); err != nil {
 			return nil, fmt.Errorf("inspection/postgres/incident_repo: scan incident: %w", err)
 		}
+		inc.PropertyID = postgres.DerefString(propID)
+		inc.LotID = postgres.DerefString(lotID)
+		inc.LeaseID = postgres.DerefString(lseID)
 		inc.Status = domain.IncidentStatus(status)
 		inc.EstimatedCostCents = money.AmountCents(costCents)
 		out = append(out, inc)

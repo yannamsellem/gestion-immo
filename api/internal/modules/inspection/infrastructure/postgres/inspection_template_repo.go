@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/inspection/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -44,20 +45,26 @@ func (r *InspectionTemplateRepo) SaveTemplate(ctx context.Context, tpl domain.In
 		tpl.UpdatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("inspection/postgres/inspection_template_repo: save inspection template %s: %w", tpl.ID, err)
 	}
 	return nil
 }
 
 // FindTemplateByID retrieves an InspectionTemplate by ID.
-func (r *InspectionTemplateRepo) FindTemplateByID(ctx context.Context, id string) (*domain.InspectionTemplate, error) {
+func (r *InspectionTemplateRepo) FindTemplateByID(ctx context.Context, tplID string) (*domain.InspectionTemplate, error) {
+	if !id.IsValidUUID(tplID) {
+		return nil, domain.ErrTemplateNotFound
+	}
 	const query = `
 		SELECT id, name, rooms, default_elements, created_at, updated_at
 		FROM inspection_templates
 		WHERE id = $1
 	`
 	var tpl domain.InspectionTemplate
-	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id).Scan(
+	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, tplID).Scan(
 		&tpl.ID,
 		&tpl.Name,
 		&tpl.Rooms,

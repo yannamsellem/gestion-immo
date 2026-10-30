@@ -24,7 +24,7 @@ type CreateInspectionTemplateCmd struct {
 
 // InspectionTemplateDTO is an immutable projection of a domain.InspectionTemplate.
 type InspectionTemplateDTO struct {
-	ID              string    `json:"id"`
+	ID              string    `json:"id" format:"uuid"`
 	Name            string    `json:"name"`
 	Rooms           []string  `json:"rooms"`
 	DefaultElements []string  `json:"default_elements"`
@@ -34,8 +34,8 @@ type InspectionTemplateDTO struct {
 
 // CreateInspectionCmd carries the input for starting a Move-In (ENTRANT) or Move-Out (SORTANT) inspection.
 type CreateInspectionCmd struct {
-	LeaseID                  string               `json:"lease_id"`
-	TemplateID               string               `json:"template_id,omitempty"`
+	LeaseID                  string               `json:"lease_id" format:"uuid"`
+	TemplateID               string               `json:"template_id,omitempty" format:"uuid"`
 	Type                     string               `json:"type"`
 	EntryInspectionID        *string              `json:"entry_inspection_id,omitempty"`
 	InspectionDate           string               `json:"inspection_date,omitempty"`
@@ -56,8 +56,8 @@ type InspectionItemInput struct {
 
 // InspectionItemDTO is an immutable projection of a domain.InspectionItem.
 type InspectionItemDTO struct {
-	ID           string                `json:"id"`
-	InspectionID string                `json:"inspection_id"`
+	ID           string                `json:"id" format:"uuid"`
+	InspectionID string                `json:"inspection_id" format:"uuid"`
 	RoomName     string                `json:"room_name"`
 	ElementName  string                `json:"element_name"`
 	Condition    domain.ConditionState `json:"condition"`
@@ -67,11 +67,11 @@ type InspectionItemDTO struct {
 
 // InspectionDTO is an immutable projection of a domain.Inspection with its items.
 type InspectionDTO struct {
-	ID                       string                `json:"id"`
-	LeaseID                  string                `json:"lease_id"`
-	TemplateID               string                `json:"template_id"`
+	ID                       string                `json:"id" format:"uuid"`
+	LeaseID                  string                `json:"lease_id" format:"uuid"`
+	TemplateID               string                `json:"template_id" format:"uuid"`
 	Type                     domain.InspectionType `json:"type"`
-	EntryInspectionID        *string               `json:"entry_inspection_id,omitempty"`
+	EntryInspectionID        *string               `json:"entry_inspection_id,omitempty" format:"uuid"`
 	Items                    []InspectionItemDTO   `json:"items"`
 	MeterReadings            domain.MeterReadings  `json:"meter_readings,omitempty"`
 	KeysHandedOverCount      int                   `json:"keys_handed_over_count,omitempty"`
@@ -97,10 +97,10 @@ type ElementComparisonDTO struct {
 
 // InspectionReportDTO represents a generated PDF inspection report (standalone or with entry vs. exit comparison).
 type InspectionReportDTO struct {
-	InspectionID       string                 `json:"inspection_id"`
-	LeaseID            string                 `json:"lease_id"`
+	InspectionID       string                 `json:"inspection_id" format:"uuid"`
+	LeaseID            string                 `json:"lease_id" format:"uuid"`
 	Type               domain.InspectionType  `json:"type"`
-	EntryInspectionID  *string                `json:"entry_inspection_id,omitempty"`
+	EntryInspectionID  *string                `json:"entry_inspection_id,omitempty" format:"uuid"`
 	HasEntryComparison bool                   `json:"has_entry_comparison"`
 	Comparisons        []ElementComparisonDTO `json:"comparisons,omitempty"`
 	Degradations       []ElementComparisonDTO `json:"degradations,omitempty"`
@@ -126,7 +126,7 @@ type CreateIncidentCmd struct {
 
 // UpdateIncidentCmd carries the input for updating an incident's status, claim number, cost, observations, or photos.
 type UpdateIncidentCmd struct {
-	IncidentID           string             `json:"incident_id,omitempty"`
+	IncidentID           string             `json:"incident_id,omitempty" format:"uuid"`
 	Status               string             `json:"status,omitempty"`
 	InsuranceClaimNumber *string            `json:"insurance_claim_number,omitempty"`
 	EstimatedCostCents   *money.AmountCents `json:"estimated_cost_cents,omitempty"`
@@ -138,7 +138,7 @@ type UpdateIncidentCmd struct {
 
 // IncidentDTO is an immutable projection of a domain.Incident.
 type IncidentDTO struct {
-	ID                   string                `json:"id"`
+	ID                   string                `json:"id" format:"uuid"`
 	PropertyID           string                `json:"property_id,omitempty"`
 	LotID                string                `json:"lot_id,omitempty"`
 	LeaseID              string                `json:"lease_id,omitempty"`
@@ -199,7 +199,7 @@ func (s *Service) CreateTemplate(ctx context.Context, cmd CreateInspectionTempla
 		elements = append([]string(nil), domain.DefaultRoomElements...)
 	}
 
-	tplID, err := id.Generate("itpl")
+	tplID, err := id.NewV7()
 	if err != nil {
 		return InspectionTemplateDTO{}, err
 	}
@@ -222,10 +222,13 @@ func (s *Service) CreateTemplate(ctx context.Context, cmd CreateInspectionTempla
 }
 
 // GetTemplate retrieves an inspection template by ID.
-func (s *Service) GetTemplate(ctx context.Context, id string) (InspectionTemplateDTO, error) {
-	trimmed := strings.TrimSpace(id)
+func (s *Service) GetTemplate(ctx context.Context, tplID string) (InspectionTemplateDTO, error) {
+	trimmed := strings.TrimSpace(tplID)
 	if trimmed == "" {
 		return InspectionTemplateDTO{}, fmt.Errorf("%w: template_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmed) {
+		return InspectionTemplateDTO{}, domain.ErrTemplateNotFound
 	}
 	tpl, err := s.templates.FindTemplateByID(ctx, trimmed)
 	if err != nil {
@@ -255,10 +258,16 @@ func (s *Service) CreateInspection(ctx context.Context, cmd CreateInspectionCmd)
 	if leaseID == "" {
 		return InspectionDTO{}, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(leaseID) {
+		return InspectionDTO{}, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
+	}
 
 	templateID := strings.TrimSpace(cmd.TemplateID)
 	if templateID == "" {
 		return InspectionDTO{}, fmt.Errorf("%w: template_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(templateID) {
+		return InspectionDTO{}, fmt.Errorf("%w: template_id must be a valid UUID", domain.ErrValidation)
 	}
 	if _, err := s.templates.FindTemplateByID(ctx, templateID); err != nil {
 		return InspectionDTO{}, err
@@ -273,6 +282,9 @@ func (s *Service) CreateInspection(ctx context.Context, cmd CreateInspectionCmd)
 	if cmd.EntryInspectionID != nil {
 		trimmedEntry := strings.TrimSpace(*cmd.EntryInspectionID)
 		if trimmedEntry != "" {
+			if !id.IsValidUUID(trimmedEntry) {
+				return InspectionDTO{}, fmt.Errorf("%w: entry_inspection_id must be a valid UUID", domain.ErrValidation)
+			}
 			if inspType != domain.InspectionTypeMoveOut {
 				return InspectionDTO{}, fmt.Errorf("%w: entry_inspection_id is only allowed on MOVE_OUT inspections", domain.ErrValidation)
 			}
@@ -295,7 +307,7 @@ func (s *Service) CreateInspection(ctx context.Context, cmd CreateInspectionCmd)
 		return InspectionDTO{}, fmt.Errorf("%w: invalid inspection_date %q: %v", domain.ErrValidation, cmd.InspectionDate, err)
 	}
 
-	inspID, err := id.Generate("edl")
+	inspID, err := id.NewV7()
 	if err != nil {
 		return InspectionDTO{}, err
 	}
@@ -325,10 +337,13 @@ func (s *Service) CreateInspection(ctx context.Context, cmd CreateInspectionCmd)
 }
 
 // GetInspection retrieves an inspection by ID along with its items.
-func (s *Service) GetInspection(ctx context.Context, id string) (InspectionDTO, error) {
-	trimmed := strings.TrimSpace(id)
+func (s *Service) GetInspection(ctx context.Context, inspID string) (InspectionDTO, error) {
+	trimmed := strings.TrimSpace(inspID)
 	if trimmed == "" {
 		return InspectionDTO{}, fmt.Errorf("%w: inspection_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmed) {
+		return InspectionDTO{}, domain.ErrInspectionNotFound
 	}
 	insp, err := s.inspections.FindInspectionByID(ctx, trimmed)
 	if err != nil {
@@ -342,6 +357,9 @@ func (s *Service) ListInspectionsByLease(ctx context.Context, leaseID string) ([
 	trimmed := strings.TrimSpace(leaseID)
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
 	}
 	list, err := s.inspections.ListInspectionsByLease(ctx, trimmed)
 	if err != nil {
@@ -359,6 +377,9 @@ func (s *Service) UpsertInspectionItems(ctx context.Context, inspectionID string
 	trimmedID := strings.TrimSpace(inspectionID)
 	if trimmedID == "" {
 		return InspectionDTO{}, fmt.Errorf("%w: inspection_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmedID) {
+		return InspectionDTO{}, fmt.Errorf("%w: inspection_id must be a valid UUID", domain.ErrValidation)
 	}
 
 	insp, err := s.inspections.FindInspectionByID(ctx, trimmedID)
@@ -392,7 +413,7 @@ func (s *Service) UpsertInspectionItems(ctx context.Context, inspectionID string
 			itemID = prev.ID
 			createdAt = prev.CreatedAt
 		} else {
-			itemID, err = id.Generate("edli")
+			itemID, err = id.NewV7()
 			if err != nil {
 				return InspectionDTO{}, err
 			}
@@ -440,6 +461,9 @@ func (s *Service) GenerateInspectionReport(ctx context.Context, inspectionID str
 	trimmedID := strings.TrimSpace(inspectionID)
 	if trimmedID == "" {
 		return InspectionReportDTO{}, fmt.Errorf("%w: inspection_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmedID) {
+		return InspectionReportDTO{}, fmt.Errorf("%w: inspection_id must be a valid UUID", domain.ErrValidation)
 	}
 
 	insp, err := s.inspections.FindInspectionByID(ctx, trimmedID)
@@ -537,6 +561,19 @@ func (s *Service) CreateIncident(ctx context.Context, cmd CreateIncidentCmd) (In
 		return IncidentDTO{}, fmt.Errorf("%w: estimated_cost_cents cannot be negative", domain.ErrValidation)
 	}
 
+	propID := strings.TrimSpace(cmd.PropertyID)
+	if propID != "" && !id.IsValidUUID(propID) {
+		return IncidentDTO{}, fmt.Errorf("%w: property_id must be a valid UUID", domain.ErrValidation)
+	}
+	lotID := strings.TrimSpace(cmd.LotID)
+	if lotID != "" && !id.IsValidUUID(lotID) {
+		return IncidentDTO{}, fmt.Errorf("%w: lot_id must be a valid UUID", domain.ErrValidation)
+	}
+	leaseID := strings.TrimSpace(cmd.LeaseID)
+	if leaseID != "" && !id.IsValidUUID(leaseID) {
+		return IncidentDTO{}, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
+	}
+
 	statusStr := strings.ToUpper(strings.TrimSpace(cmd.Status))
 	if statusStr == "" {
 		statusStr = string(domain.IncidentStatusOpen)
@@ -551,7 +588,7 @@ func (s *Service) CreateIncident(ctx context.Context, cmd CreateIncidentCmd) (In
 		return IncidentDTO{}, fmt.Errorf("%w: invalid occurred_at %q: %v", domain.ErrValidation, cmd.OccurredAt, err)
 	}
 
-	incID, err := id.Generate("inc")
+	incID, err := id.NewV7()
 	if err != nil {
 		return IncidentDTO{}, err
 	}
@@ -559,9 +596,9 @@ func (s *Service) CreateIncident(ctx context.Context, cmd CreateIncidentCmd) (In
 	now := time.Now().UTC()
 	inc := domain.Incident{
 		ID:                   incID,
-		PropertyID:           strings.TrimSpace(cmd.PropertyID),
-		LotID:                strings.TrimSpace(cmd.LotID),
-		LeaseID:              strings.TrimSpace(cmd.LeaseID),
+		PropertyID:           propID,
+		LotID:                lotID,
+		LeaseID:              leaseID,
 		Title:                title,
 		Status:               status,
 		InsuranceClaimNumber: strings.TrimSpace(cmd.InsuranceClaimNumber),
@@ -585,6 +622,9 @@ func (s *Service) UpdateIncident(ctx context.Context, cmd UpdateIncidentCmd) (In
 	trimmedID := strings.TrimSpace(cmd.IncidentID)
 	if trimmedID == "" {
 		return IncidentDTO{}, fmt.Errorf("%w: incident_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmedID) {
+		return IncidentDTO{}, fmt.Errorf("%w: incident_id must be a valid UUID", domain.ErrValidation)
 	}
 
 	inc, err := s.incidents.FindIncidentByID(ctx, trimmedID)
@@ -634,10 +674,13 @@ func (s *Service) UpdateIncident(ctx context.Context, cmd UpdateIncidentCmd) (In
 }
 
 // GetIncident retrieves an incident by ID.
-func (s *Service) GetIncident(ctx context.Context, id string) (IncidentDTO, error) {
-	trimmed := strings.TrimSpace(id)
+func (s *Service) GetIncident(ctx context.Context, incID string) (IncidentDTO, error) {
+	trimmed := strings.TrimSpace(incID)
 	if trimmed == "" {
 		return IncidentDTO{}, fmt.Errorf("%w: incident_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmed) {
+		return IncidentDTO{}, domain.ErrIncidentNotFound
 	}
 	inc, err := s.incidents.FindIncidentByID(ctx, trimmed)
 	if err != nil {
@@ -648,7 +691,15 @@ func (s *Service) GetIncident(ctx context.Context, id string) (IncidentDTO, erro
 
 // ListIncidents lists incidents filtered optionally by property_id and/or lease_id.
 func (s *Service) ListIncidents(ctx context.Context, propertyID, leaseID string) ([]IncidentDTO, error) {
-	list, err := s.incidents.ListIncidents(ctx, strings.TrimSpace(propertyID), strings.TrimSpace(leaseID))
+	trimmedProp := strings.TrimSpace(propertyID)
+	if trimmedProp != "" && !id.IsValidUUID(trimmedProp) {
+		return nil, fmt.Errorf("%w: property_id must be a valid UUID", domain.ErrValidation)
+	}
+	trimmedLease := strings.TrimSpace(leaseID)
+	if trimmedLease != "" && !id.IsValidUUID(trimmedLease) {
+		return nil, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
+	}
+	list, err := s.incidents.ListIncidents(ctx, trimmedProp, trimmedLease)
 	if err != nil {
 		return nil, err
 	}

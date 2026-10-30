@@ -9,6 +9,7 @@ import (
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/infrastructure"
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/infrastructure/memory"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
@@ -102,9 +103,10 @@ func TestRecordJournalEntry_CreditingDebitNormalAccountDecreasesBalance(t *testi
 		infrastructure.NewAnnualAccountsPDFRenderer(pdfEngine),
 	)
 
+	entityID := id.MustNewV7()
 	// Validate single-line JournalEntry fails domain validation
 	singleLineEntry := domain.JournalEntry{
-		LegalEntityID: "ent_test_512",
+		LegalEntityID: entityID,
 		Lines: []domain.JournalLine{
 			{AccountCode: "512000", DebitCents: 0, CreditCents: 0},
 		},
@@ -115,7 +117,7 @@ func TestRecordJournalEntry_CreditingDebitNormalAccountDecreasesBalance(t *testi
 
 	// 1. Incoming rent receipt: Debit 512000 Banque 10 000,00 € / Credit 706100 Locations 10 000,00 €
 	_, err := svc.RecordJournalEntry(ctx, accountingapp.RecordJournalEntryCmd{
-		LegalEntityID: "ent_test_512",
+		LegalEntityID: entityID,
 		FiscalYear:    2024,
 		JournalCode:   "BQ",
 		Label:         "Encaissement loyer",
@@ -130,7 +132,7 @@ func TestRecordJournalEntry_CreditingDebitNormalAccountDecreasesBalance(t *testi
 
 	// 2. Outgoing supplier payment: Debit 614000 Charges 3 000,00 € / Credit 512000 Banque 3 000,00 €
 	_, err = svc.RecordJournalEntry(ctx, accountingapp.RecordJournalEntryCmd{
-		LegalEntityID: "ent_test_512",
+		LegalEntityID: entityID,
 		FiscalYear:    2024,
 		JournalCode:   "BQ",
 		Label:         "Règlement charges locatives",
@@ -145,7 +147,7 @@ func TestRecordJournalEntry_CreditingDebitNormalAccountDecreasesBalance(t *testi
 
 	// 3. Rent credit note (avoir): Debit 706100 Locations 1 000,00 € / Credit 512000 Banque 1 000,00 €
 	_, err = svc.RecordJournalEntry(ctx, accountingapp.RecordJournalEntryCmd{
-		LegalEntityID: "ent_test_512",
+		LegalEntityID: entityID,
 		FiscalYear:    2024,
 		JournalCode:   "BQ",
 		Label:         "Avoir loyer remboursé",
@@ -158,7 +160,7 @@ func TestRecordJournalEntry_CreditingDebitNormalAccountDecreasesBalance(t *testi
 		t.Fatalf("record credit note journal entry: %v", err)
 	}
 
-	stmt, err := svc.PreviewFinancialStatements(ctx, "ent_test_512", 2024, nil)
+	stmt, err := svc.PreviewFinancialStatements(ctx, entityID, 2024, nil)
 	if err != nil {
 		t.Fatalf("preview financial statements: %v", err)
 	}

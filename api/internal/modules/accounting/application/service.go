@@ -41,7 +41,7 @@ type JournalLineInput struct {
 
 // RecordExpenseInvoiceCmd carries the input for recording a supplier expense invoice in the AC (Purchases) journal.
 type RecordExpenseInvoiceCmd struct {
-	LegalEntityID      string            `json:"legal_entity_id"`
+	LegalEntityID      string            `json:"legal_entity_id" format:"uuid"`
 	SupplierName       string            `json:"supplier_name,omitempty"`
 	ExpenseAccountCode string            `json:"expense_account_code"`
 	Label              string            `json:"label,omitempty"`
@@ -68,7 +68,7 @@ type RecordJournalEntryCmd struct {
 
 // JournalLineDTO is an immutable projection of a domain.JournalLine.
 type JournalLineDTO struct {
-	ID              string            `json:"id"`
+	ID              string            `json:"id" format:"uuid"`
 	LineID          string            `json:"line_id,omitempty"`
 	AccountCode     string            `json:"account_code"`
 	AccountLabel    string            `json:"account_label"`
@@ -83,8 +83,8 @@ type JournalLineDTO struct {
 
 // JournalEntryDTO is an immutable projection of a domain.JournalEntry.
 type JournalEntryDTO struct {
-	ID               string            `json:"id"`
-	LegalEntityID    string            `json:"legal_entity_id"`
+	ID               string            `json:"id" format:"uuid"`
+	LegalEntityID    string            `json:"legal_entity_id" format:"uuid"`
 	FiscalYear       int               `json:"fiscal_year"`
 	JournalCode      string            `json:"journal_code"`
 	JournalLabel     string            `json:"journal_label"`
@@ -102,8 +102,8 @@ type JournalEntryDTO struct {
 
 // AnnualAccountReportDTO represents a generated Annual Accounts and Tax Return PDF stored on Cloudflare R2.
 type AnnualAccountReportDTO struct {
-	ID              string            `json:"id"`
-	LegalEntityID   string            `json:"legal_entity_id"`
+	ID              string            `json:"id" format:"uuid"`
+	LegalEntityID   string            `json:"legal_entity_id" format:"uuid"`
 	FiscalYear      int               `json:"fiscal_year"`
 	Category        string            `json:"category"`
 	FileName        string            `json:"file_name"`
@@ -381,8 +381,8 @@ func (s *Service) RecordCashDepositEntry(
 // and 445660 (when vat_cents > 0) and crediting 401000 (Fournisseurs).
 func (s *Service) RecordExpenseInvoice(ctx context.Context, cmd RecordExpenseInvoiceCmd) (JournalEntryDTO, error) {
 	entityID := strings.TrimSpace(cmd.LegalEntityID)
-	if entityID == "" {
-		return JournalEntryDTO{}, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	if !id.IsValidUUID(entityID) {
+		return JournalEntryDTO{}, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
 	}
 	if cmd.AmountHTCents <= 0 || cmd.VATCents < 0 {
 		return JournalEntryDTO{}, fmt.Errorf("%w: amount_ht_cents must be positive and vat_cents non-negative", domain.ErrValidation)
@@ -445,8 +445,8 @@ func (s *Service) RecordExpenseInvoice(ctx context.Context, cmd RecordExpenseInv
 // and updates the entity's account balance lines for the fiscal year inside a single UnitOfWork transaction.
 func (s *Service) RecordJournalEntry(ctx context.Context, cmd RecordJournalEntryCmd) (JournalEntryDTO, error) {
 	entityID := strings.TrimSpace(cmd.LegalEntityID)
-	if entityID == "" {
-		return JournalEntryDTO{}, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	if !id.IsValidUUID(entityID) {
+		return JournalEntryDTO{}, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
 	}
 	label := strings.TrimSpace(cmd.Label)
 	if label == "" {
@@ -489,7 +489,7 @@ func (s *Service) RecordJournalEntry(ctx context.Context, cmd RecordJournalEntry
 		journalLabel = defaultJournalLabel(journalCode)
 	}
 
-	entryID, err := id.Generate("je")
+	entryID, err := id.NewV7()
 	if err != nil {
 		return JournalEntryDTO{}, err
 	}
@@ -509,7 +509,7 @@ func (s *Service) RecordJournalEntry(ctx context.Context, cmd RecordJournalEntry
 		if acctCode == "" {
 			return JournalEntryDTO{}, fmt.Errorf("%w: account_code is required on line %d", domain.ErrValidation, i+1)
 		}
-		lineID, lErr := id.Generate("jl")
+		lineID, lErr := id.NewV7()
 		if lErr != nil {
 			return JournalEntryDTO{}, lErr
 		}
@@ -596,8 +596,13 @@ func (s *Service) RecordJournalEntry(ctx context.Context, cmd RecordJournalEntry
 // UpsertAccountBalanceLines directly seeds or updates AccountBalanceLines for an entity and fiscal year.
 func (s *Service) UpsertAccountBalanceLines(ctx context.Context, entityID string, fiscalYear int, lines []domain.AccountBalanceLine) error {
 	trimmed := strings.TrimSpace(entityID)
-	if trimmed == "" {
-		return fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	if !id.IsValidUUID(trimmed) {
+		return fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
+	}
+	for _, l := range lines {
+		if trimmedID := strings.TrimSpace(l.ID); trimmedID != "" && !id.IsValidUUID(trimmedID) {
+			return fmt.Errorf("%w: account balance line id must be a valid UUID", domain.ErrValidation)
+		}
 	}
 	if fiscalYear <= 0 {
 		fiscalYear = time.Now().UTC().Year()
@@ -608,8 +613,8 @@ func (s *Service) UpsertAccountBalanceLines(ctx context.Context, entityID string
 // ListJournalEntries returns all recorded JournalEntries for an entity and fiscal year.
 func (s *Service) ListJournalEntries(ctx context.Context, entityID string, fiscalYear int) ([]JournalEntryDTO, error) {
 	trimmed := strings.TrimSpace(entityID)
-	if trimmed == "" {
-		return nil, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
 	}
 	entries, err := s.journalEntries.ListJournalEntries(ctx, trimmed, fiscalYear)
 	if err != nil {
@@ -631,8 +636,8 @@ func (s *Service) PreviewFinancialStatements(
 	disabledLineIDs []string,
 ) (domain.ComputedFinancialStatementsDTO, error) {
 	trimmedEntity := strings.TrimSpace(entityID)
-	if trimmedEntity == "" {
-		return domain.ComputedFinancialStatementsDTO{}, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	if !id.IsValidUUID(trimmedEntity) {
+		return domain.ComputedFinancialStatementsDTO{}, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
 	}
 	if fiscalYear <= 0 {
 		fiscalYear = time.Now().UTC().Year()
@@ -644,8 +649,8 @@ func (s *Service) PreviewFinancialStatements(
 	}
 
 	disabledMap := make(map[string]bool, len(disabledLineIDs))
-	for _, id := range disabledLineIDs {
-		trimmedID := strings.TrimSpace(id)
+	for _, lineSlug := range disabledLineIDs {
+		trimmedID := strings.TrimSpace(lineSlug)
 		if trimmedID != "" {
 			disabledMap[trimmedID] = true
 		}
@@ -664,19 +669,22 @@ func (s *Service) GenerateAnnualAccountsPDF(
 	disabledLineIDs []string,
 ) (StoredFileDTO, error) {
 	trimmedEntity := strings.TrimSpace(entityID)
-	if trimmedEntity == "" {
-		return StoredFileDTO{}, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	if !id.IsValidUUID(trimmedEntity) {
+		return StoredFileDTO{}, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
 	}
 	if fiscalYear <= 0 {
 		fiscalYear = time.Now().UTC().Year()
+	}
+
+	meta, err := s.resolveAnnualAccountsMetadata(ctx, trimmedEntity, fiscalYear)
+	if err != nil {
+		return StoredFileDTO{}, err
 	}
 
 	stmt, err := s.PreviewFinancialStatements(ctx, trimmedEntity, fiscalYear, disabledLineIDs)
 	if err != nil {
 		return StoredFileDTO{}, err
 	}
-
-	meta := s.resolveAnnualAccountsMetadata(ctx, trimmedEntity, fiscalYear)
 
 	renderer := s.annualAccountsRenderer
 	if renderer == nil {
@@ -687,7 +695,7 @@ func (s *Service) GenerateAnnualAccountsPDF(
 		return StoredFileDTO{}, fmt.Errorf("accounting: render annual accounts pdf: %w", err)
 	}
 
-	reportID, err := id.Generate("aar")
+	reportID, err := id.NewV7()
 	if err != nil {
 		return StoredFileDTO{}, err
 	}
@@ -737,8 +745,8 @@ func (s *Service) GenerateAnnualAccountsPDF(
 // ExportEntityFEC exports the normative 18-column DGFiP Fichier des Écritures Comptables (FEC) for an entity and fiscal year.
 func (s *Service) ExportEntityFEC(ctx context.Context, entityID string, fiscalYear int) ([]byte, error) {
 	trimmedEntity := strings.TrimSpace(entityID)
-	if trimmedEntity == "" {
-		return nil, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	if !id.IsValidUUID(trimmedEntity) {
+		return nil, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
 	}
 	if fiscalYear <= 0 {
 		fiscalYear = time.Now().UTC().Year()
@@ -791,8 +799,12 @@ func (s *Service) syncBalanceLinesFromEntry(ctx context.Context, balancesRepo do
 
 		cur, exists := byLineID[lineID]
 		if !exists {
+			balID, bErr := id.NewV7()
+			if bErr != nil {
+				return bErr
+			}
 			cur = domain.AccountBalanceLine{
-				ID:              fmt.Sprintf("%s_%d_%s", entry.LegalEntityID, entry.FiscalYear, lineID),
+				ID:              balID,
 				LegalEntityID:   entry.LegalEntityID,
 				FiscalYear:      entry.FiscalYear,
 				LineID:          lineID,
@@ -821,8 +833,8 @@ func (s *Service) syncBalanceLinesFromEntry(ctx context.Context, balancesRepo do
 	}
 
 	updated := make([]domain.AccountBalanceLine, 0, len(touchedOrder))
-	for _, id := range touchedOrder {
-		updated = append(updated, byLineID[id])
+	for _, lineSlug := range touchedOrder {
+		updated = append(updated, byLineID[lineSlug])
 	}
 
 	return balancesRepo.UpsertAccountBalanceLines(ctx, entry.LegalEntityID, entry.FiscalYear, updated)
@@ -855,7 +867,7 @@ func computeSignedLineAmount(sec domain.StatementSection, debit, credit money.Am
 func defaultSGCAMBalanceLines(entityID string, fiscalYear int) []domain.AccountBalanceLine {
 	return []domain.AccountBalanceLine{
 		{
-			ID:              entityID + "_rev_locaux",
+			ID:              id.MustNewV7(),
 			LegalEntityID:   entityID,
 			FiscalYear:      fiscalYear,
 			LineID:          "rev_locaux",
@@ -867,7 +879,7 @@ func defaultSGCAMBalanceLines(entityID string, fiscalYear int) []domain.AccountB
 			NetNMinus1Cents: money.AmountCents(132604_00),
 		},
 		{
-			ID:              entityID + "_rev_comm",
+			ID:              id.MustNewV7(),
 			LegalEntityID:   entityID,
 			FiscalYear:      fiscalYear,
 			LineID:          "rev_comm",
@@ -879,7 +891,7 @@ func defaultSGCAMBalanceLines(entityID string, fiscalYear int) []domain.AccountB
 			NetNMinus1Cents: money.AmountCents(15301_00),
 		},
 		{
-			ID:              entityID + "_chg_loc",
+			ID:              id.MustNewV7(),
 			LegalEntityID:   entityID,
 			FiscalYear:      fiscalYear,
 			LineID:          "chg_loc",
@@ -891,7 +903,7 @@ func defaultSGCAMBalanceLines(entityID string, fiscalYear int) []domain.AccountB
 			NetNMinus1Cents: money.AmountCents(77663_00),
 		},
 		{
-			ID:              entityID + "_chg_tf",
+			ID:              id.MustNewV7(),
 			LegalEntityID:   entityID,
 			FiscalYear:      fiscalYear,
 			LineID:          "chg_tf",
@@ -903,7 +915,7 @@ func defaultSGCAMBalanceLines(entityID string, fiscalYear int) []domain.AccountB
 			NetNMinus1Cents: money.AmountCents(55767_00),
 		},
 		{
-			ID:              entityID + "_chg_fourn_admin",
+			ID:              id.MustNewV7(),
 			LegalEntityID:   entityID,
 			FiscalYear:      fiscalYear,
 			LineID:          "chg_fourn_admin",
@@ -917,10 +929,13 @@ func defaultSGCAMBalanceLines(entityID string, fiscalYear int) []domain.AccountB
 	}
 }
 
-func (s *Service) resolveAnnualAccountsMetadata(ctx context.Context, entityID string, fiscalYear int) domain.AnnualAccountsMetadata {
+func (s *Service) resolveAnnualAccountsMetadata(ctx context.Context, entityID string, fiscalYear int) (domain.AnnualAccountsMetadata, error) {
 	if s.portfolioSvc != nil {
 		summary, err := s.portfolioSvc.GetEntityPortfolioSummary(ctx, entityID)
-		if err == nil && strings.TrimSpace(summary.Entity.ID) != "" {
+		if err != nil {
+			return domain.AnnualAccountsMetadata{}, err
+		}
+		if strings.TrimSpace(summary.Entity.ID) != "" {
 			shareholders := make([]domain.ShareholderCapitalRow, 0, len(summary.Shareholders))
 			for _, sh := range summary.Shareholders {
 				role := "Associé"
@@ -950,10 +965,10 @@ func (s *Service) resolveAnnualAccountsMetadata(ctx context.Context, entityID st
 				TotalShares:       summary.Entity.TotalShares,
 				AccountantFirm:    "Cabinet SGCAM — Société de Gestion et de Comptabilité",
 				Shareholders:      shareholders,
-			}
+			}, nil
 		}
 	}
-	return defaultAnnualAccountsMetadata(entityID, fiscalYear)
+	return defaultAnnualAccountsMetadata(entityID, fiscalYear), nil
 }
 
 func defaultAnnualAccountsMetadata(entityID string, fiscalYear int) domain.AnnualAccountsMetadata {

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/document/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -37,7 +38,7 @@ func (r *GLIDossierRepo) SaveGLIDossier(ctx context.Context, dossier domain.GLID
 		dossier.ID,
 		dossier.LeaseID,
 		dossier.LegalEntityID,
-		dossier.TemplateID,
+		postgres.NullableUUID(dossier.TemplateID),
 		dossier.GLIPolicyNumber,
 		int64(dossier.TotalUnpaidCents),
 		dossier.UnpaidMonths,
@@ -46,13 +47,19 @@ func (r *GLIDossierRepo) SaveGLIDossier(ctx context.Context, dossier domain.GLID
 		dossier.CreatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("document/postgres/gli_dossier_repo: save GLI dossier %s: %w", dossier.ID, err)
 	}
 	return nil
 }
 
 // FindGLIDossierByID retrieves a GLIDossier by ID.
-func (r *GLIDossierRepo) FindGLIDossierByID(ctx context.Context, id string) (*domain.GLIDossier, error) {
+func (r *GLIDossierRepo) FindGLIDossierByID(ctx context.Context, dossierID string) (*domain.GLIDossier, error) {
+	if !id.IsValidUUID(dossierID) {
+		return nil, domain.ErrGLIDossierNotFound
+	}
 	const query = `
 		SELECT id, lease_id, legal_entity_id, template_id, gli_policy_number,
 		       total_unpaid_cents, unpaid_months, archive_r2_key, included_files, created_at
@@ -60,12 +67,13 @@ func (r *GLIDossierRepo) FindGLIDossierByID(ctx context.Context, id string) (*do
 		WHERE id = $1
 	`
 	var d domain.GLIDossier
+	var tplID *string
 	var totalUnpaid int64
-	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id).Scan(
+	err := postgres.Conn(ctx, r.db).QueryRow(ctx, query, dossierID).Scan(
 		&d.ID,
 		&d.LeaseID,
 		&d.LegalEntityID,
-		&d.TemplateID,
+		&tplID,
 		&d.GLIPolicyNumber,
 		&totalUnpaid,
 		&d.UnpaidMonths,
@@ -79,12 +87,16 @@ func (r *GLIDossierRepo) FindGLIDossierByID(ctx context.Context, id string) (*do
 		}
 		return nil, fmt.Errorf("document/postgres/gli_dossier_repo: find GLI dossier by id: %w", err)
 	}
+	d.TemplateID = postgres.DerefString(tplID)
 	d.TotalUnpaidCents = money.AmountCents(totalUnpaid)
 	return &d, nil
 }
 
 // ListGLIDossiersByLease lists all GLIDossiers generated for a lease.
 func (r *GLIDossierRepo) ListGLIDossiersByLease(ctx context.Context, leaseID string) ([]domain.GLIDossier, error) {
+	if !id.IsValidUUID(leaseID) {
+		return []domain.GLIDossier{}, nil
+	}
 	const query = `
 		SELECT id, lease_id, legal_entity_id, template_id, gli_policy_number,
 		       total_unpaid_cents, unpaid_months, archive_r2_key, included_files, created_at
@@ -101,12 +113,13 @@ func (r *GLIDossierRepo) ListGLIDossiersByLease(ctx context.Context, leaseID str
 	var out []domain.GLIDossier
 	for rows.Next() {
 		var d domain.GLIDossier
+		var tplID *string
 		var totalUnpaid int64
 		if err := rows.Scan(
 			&d.ID,
 			&d.LeaseID,
 			&d.LegalEntityID,
-			&d.TemplateID,
+			&tplID,
 			&d.GLIPolicyNumber,
 			&totalUnpaid,
 			&d.UnpaidMonths,
@@ -116,6 +129,7 @@ func (r *GLIDossierRepo) ListGLIDossiersByLease(ctx context.Context, leaseID str
 		); err != nil {
 			return nil, fmt.Errorf("document/postgres/gli_dossier_repo: scan GLI dossier: %w", err)
 		}
+		d.TemplateID = postgres.DerefString(tplID)
 		d.TotalUnpaidCents = money.AmountCents(totalUnpaid)
 		out = append(out, d)
 	}

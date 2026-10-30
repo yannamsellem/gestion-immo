@@ -86,14 +86,14 @@ type AssembleGLIDossierByLeaseBody struct {
 }
 
 type assembleGLIDossierByLeaseInput struct {
-	ID         string `path:"id"`
+	ID         string `path:"id" format:"uuid"`
 	TemplateID string `query:"template_id" required:"false"`
 	RawBody    []byte
 }
 
 // AssembleGLIDossierBody represents the request body for assembling a GLI claim dossier.
 type AssembleGLIDossierBody struct {
-	LeaseID    string `json:"lease_id"`
+	LeaseID    string `json:"lease_id" format:"uuid"`
 	TemplateID string `json:"template_id,omitempty"`
 }
 
@@ -106,7 +106,7 @@ type gliDossierOutput struct {
 }
 
 type leaseIDInput struct {
-	ID string `path:"id"`
+	ID string `path:"id" format:"uuid"`
 }
 
 // RegisterRoutes mounts all document and GLI dossier REST endpoints on the Go 1.22+ ServeMux.

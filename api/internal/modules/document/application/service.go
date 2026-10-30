@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -56,7 +55,7 @@ type RegisterTemplateCmd struct {
 
 // DocumentTemplateDTO is an immutable projection of a domain.DocumentTemplate.
 type DocumentTemplateDTO struct {
-	ID           string                `json:"id"`
+	ID           string                `json:"id" format:"uuid"`
 	Name         string                `json:"name"`
 	TemplateType domain.TemplateType   `json:"template_type"`
 	Format       domain.TemplateFormat `json:"format"`
@@ -78,7 +77,7 @@ type AttachFileCmd struct {
 
 // GenerateDocCmd carries the input for generating a document (.docx or PDF) from a template.
 type GenerateDocCmd struct {
-	TemplateID     string                         `json:"template_id"`
+	TemplateID     string                         `json:"template_id" format:"uuid"`
 	LegalEntityID  string                         `json:"legal_entity_id,omitempty"`
 	LeaseID        string                         `json:"lease_id,omitempty"`
 	Variables      map[string]string              `json:"variables,omitempty"`
@@ -88,7 +87,7 @@ type GenerateDocCmd struct {
 
 // StoredFileDTO is an immutable projection of a domain.StoredFile with a presigned R2 download URL.
 type StoredFileDTO struct {
-	ID            string    `json:"id"`
+	ID            string    `json:"id" format:"uuid"`
 	LegalEntityID string    `json:"legal_entity_id,omitempty"`
 	LeaseID       string    `json:"lease_id,omitempty"`
 	Category      string    `json:"category"`
@@ -102,9 +101,9 @@ type StoredFileDTO struct {
 
 // GLIDossierArchiveDTO is an immutable projection of a generated 1-click GLI claim ZIP dossier.
 type GLIDossierArchiveDTO struct {
-	ID               string            `json:"id"`
-	LeaseID          string            `json:"lease_id"`
-	LegalEntityID    string            `json:"legal_entity_id"`
+	ID               string            `json:"id" format:"uuid"`
+	LeaseID          string            `json:"lease_id" format:"uuid"`
+	LegalEntityID    string            `json:"legal_entity_id" format:"uuid"`
 	TenantName       string            `json:"tenant_name"`
 	TemplateID       string            `json:"template_id"`
 	GLIPolicyNumber  string            `json:"gli_policy_number"`
@@ -187,7 +186,7 @@ func (s *Service) RegisterTemplate(ctx context.Context, cmd RegisterTemplateCmd)
 		return DocumentTemplateDTO{}, fmt.Errorf("%w: unsupported format %q", domain.ErrValidation, cmd.Format)
 	}
 
-	tplID, err := id.Generate("tpl")
+	tplID, err := id.NewV7()
 	if err != nil {
 		return DocumentTemplateDTO{}, err
 	}
@@ -262,15 +261,10 @@ func (s *Service) AttachFileToR2(ctx context.Context, cmd AttachFileCmd) (Stored
 		return StoredFileDTO{}, fmt.Errorf("%w: file content must not be empty", domain.ErrValidation)
 	}
 
-	fileID, err := id.Generate("fil")
-	if err != nil {
-		return StoredFileDTO{}, err
-	}
-
 	entityID := strings.TrimSpace(cmd.LegalEntityID)
 	leaseID := strings.TrimSpace(cmd.LeaseID)
 	if leaseID != "" {
-		if !isSafeScopeID(leaseID) {
+		if !id.IsValidUUID(leaseID) {
 			return StoredFileDTO{}, fmt.Errorf("%w: invalid lease_id", domain.ErrValidation)
 		}
 		if s.leaseSvc != nil {
@@ -280,7 +274,7 @@ func (s *Service) AttachFileToR2(ctx context.Context, cmd AttachFileCmd) (Stored
 		}
 	}
 	if entityID != "" {
-		if !isSafeScopeID(entityID) {
+		if !id.IsValidUUID(entityID) {
 			return StoredFileDTO{}, fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
 		}
 		if s.portfolioSvc != nil {
@@ -288,6 +282,11 @@ func (s *Service) AttachFileToR2(ctx context.Context, cmd AttachFileCmd) (Stored
 				return StoredFileDTO{}, err
 			}
 		}
+	}
+
+	fileID, err := id.NewV7()
+	if err != nil {
+		return StoredFileDTO{}, err
 	}
 
 	category := strings.ToUpper(strings.TrimSpace(cmd.Category))
@@ -340,6 +339,18 @@ func (s *Service) GenerateFromTemplate(ctx context.Context, cmd GenerateDocCmd) 
 	if tplID == "" {
 		return StoredFileDTO{}, fmt.Errorf("%w: template_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(tplID) {
+		return StoredFileDTO{}, fmt.Errorf("%w: template_id must be a valid UUID", domain.ErrValidation)
+	}
+
+	entityID := strings.TrimSpace(cmd.LegalEntityID)
+	if entityID != "" && !id.IsValidUUID(entityID) {
+		return StoredFileDTO{}, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
+	}
+	leaseID := strings.TrimSpace(cmd.LeaseID)
+	if leaseID != "" && !id.IsValidUUID(leaseID) {
+		return StoredFileDTO{}, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
+	}
 
 	tpl, err := s.templates.FindTemplateByID(ctx, tplID)
 	if err != nil {
@@ -347,8 +358,6 @@ func (s *Service) GenerateFromTemplate(ctx context.Context, cmd GenerateDocCmd) 
 	}
 
 	vars := make(map[string]string)
-	entityID := strings.TrimSpace(cmd.LegalEntityID)
-	leaseID := strings.TrimSpace(cmd.LeaseID)
 
 	if leaseID != "" && s.leaseSvc != nil {
 		if lease, lErr := s.leaseSvc.GetLeaseByID(ctx, leaseID); lErr == nil {
@@ -455,6 +464,12 @@ func (s *Service) AssembleGLIDossier(ctx context.Context, leaseID string, templa
 	trimmedLeaseID := strings.TrimSpace(leaseID)
 	if trimmedLeaseID == "" {
 		return GLIDossierArchiveDTO{}, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmedLeaseID) {
+		return GLIDossierArchiveDTO{}, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
+	}
+	if trimmedTpl := strings.TrimSpace(templateID); trimmedTpl != "" && !id.IsValidUUID(trimmedTpl) {
+		return GLIDossierArchiveDTO{}, fmt.Errorf("%w: template_id must be a valid UUID", domain.ErrValidation)
 	}
 	if s.leaseSvc == nil {
 		return GLIDossierArchiveDTO{}, fmt.Errorf("%w: lease service port is not configured", domain.ErrValidation)
@@ -646,11 +661,11 @@ func (s *Service) AssembleGLIDossier(ctx context.Context, leaseID string, templa
 		return GLIDossierArchiveDTO{}, fmt.Errorf("document: close GLI zip archive: %w", err)
 	}
 
-	dossierID, err := id.Generate("gli")
+	dossierID, err := id.NewV7()
 	if err != nil {
 		return GLIDossierArchiveDTO{}, err
 	}
-	archiveFileID, err := id.Generate("fil")
+	archiveFileID, err := id.NewV7()
 	if err != nil {
 		return GLIDossierArchiveDTO{}, err
 	}
@@ -721,6 +736,9 @@ func (s *Service) ListStoredFilesByLease(ctx context.Context, leaseID string) ([
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
+	}
 	files, err := s.storedFiles.ListStoredFilesByLease(ctx, trimmed)
 	if err != nil {
 		return nil, err
@@ -738,10 +756,18 @@ func (s *Service) SearchDocuments(ctx context.Context, entityID string, leaseID 
 	var files []domain.StoredFile
 	var err error
 
-	if strings.TrimSpace(leaseID) != "" {
-		files, err = s.storedFiles.ListStoredFilesByLease(ctx, strings.TrimSpace(leaseID))
-	} else if strings.TrimSpace(entityID) != "" {
-		files, err = s.storedFiles.ListStoredFilesByEntity(ctx, strings.TrimSpace(entityID))
+	trimmedLease := strings.TrimSpace(leaseID)
+	trimmedEntity := strings.TrimSpace(entityID)
+	if trimmedLease != "" {
+		if !id.IsValidUUID(trimmedLease) {
+			return nil, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
+		}
+		files, err = s.storedFiles.ListStoredFilesByLease(ctx, trimmedLease)
+	} else if trimmedEntity != "" {
+		if !id.IsValidUUID(trimmedEntity) {
+			return nil, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
+		}
+		files, err = s.storedFiles.ListStoredFilesByEntity(ctx, trimmedEntity)
 	} else {
 		return []StoredFileDTO{}, nil
 	}
@@ -764,26 +790,28 @@ func (s *Service) SearchDocuments(ctx context.Context, entityID string, leaseID 
 func (s *Service) resolveGLIDocxTemplate(ctx context.Context, templateID string) ([]byte, string, error) {
 	trimmed := strings.TrimSpace(templateID)
 	if trimmed != "" {
+		if !id.IsValidUUID(trimmed) {
+			return nil, "", fmt.Errorf("%w: template_id must be a valid UUID", domain.ErrValidation)
+		}
 		tpl, err := s.templates.FindTemplateByID(ctx, trimmed)
-		if err == nil && tpl != nil {
-			if tpl.R2Key != "" {
-				rc, dErr := s.storage.Download(ctx, tpl.R2Key)
-				if dErr == nil {
-					data, rErr := io.ReadAll(rc)
-					_ = rc.Close()
-					if rErr == nil && len(data) > 0 {
-						return data, tpl.ID, nil
-					}
-				}
-			}
-			if tpl.HTMLBody != "" {
-				data, bErr := templating.BuildMinimalDocx(tpl.HTMLBody)
-				if bErr == nil {
+		if err != nil {
+			return nil, "", err
+		}
+		if tpl.R2Key != "" {
+			rc, dErr := s.storage.Download(ctx, tpl.R2Key)
+			if dErr == nil {
+				data, rErr := io.ReadAll(rc)
+				_ = rc.Close()
+				if rErr == nil && len(data) > 0 {
 					return data, tpl.ID, nil
 				}
 			}
-		} else if err != nil && !errors.Is(err, domain.ErrTemplateNotFound) {
-			return nil, "", err
+		}
+		if tpl.HTMLBody != "" {
+			data, bErr := templating.BuildMinimalDocx(tpl.HTMLBody)
+			if bErr == nil {
+				return data, tpl.ID, nil
+			}
 		}
 	}
 
@@ -793,9 +821,6 @@ func (s *Service) resolveGLIDocxTemplate(ctx context.Context, templateID string)
 	data, err := templating.BuildMinimalDocx(defaultText)
 	if err != nil {
 		return nil, "", err
-	}
-	if trimmed == "" {
-		trimmed = "tpl_gli_default"
 	}
 	return data, trimmed, nil
 }
@@ -911,20 +936,6 @@ func (s *Service) lookupLegalEntity(ctx context.Context, entityID string) (portf
 		return portfolioapp.LegalEntityDTO{}, err
 	}
 	return summary.Entity, nil
-}
-
-func isSafeScopeID(id string) bool {
-	if id == "" || strings.Contains(id, "..") {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 func deduplicateAttachmentEntryName(baseName string, usedEntryNames map[string]int) string {

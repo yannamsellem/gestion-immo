@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/accounting/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -46,6 +47,9 @@ func (r *AnnualAccountReportRepo) SaveAnnualAccountReport(ctx context.Context, r
 		report.CreatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced legal entity does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("accounting/postgres/annual_account_report_repo: save annual account report %s: %w", report.ID, err)
 	}
 	return nil
@@ -53,6 +57,9 @@ func (r *AnnualAccountReportRepo) SaveAnnualAccountReport(ctx context.Context, r
 
 // ListAnnualAccountReports returns all generated AnnualAccountReports for an entity and fiscal year.
 func (r *AnnualAccountReportRepo) ListAnnualAccountReports(ctx context.Context, entityID string, fiscalYear int) ([]domain.AnnualAccountReport, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.AnnualAccountReport{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, fiscal_year, disabled_line_ids,
 		       net_income_n_cents, pdf_r2_key, file_name, size_bytes, created_at
