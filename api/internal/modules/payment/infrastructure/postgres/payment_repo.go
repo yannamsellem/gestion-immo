@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/payment/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -60,6 +61,9 @@ func (r *PaymentRepo) SavePayment(ctx context.Context, payment domain.Payment) e
 			payment.CreatedAt,
 		)
 		if err != nil {
+			if postgres.IsForeignKeyViolation(err) {
+				return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+			}
 			return fmt.Errorf("payment/postgres/payment_repo: insert payment %s: %w", payment.ID, err)
 		}
 
@@ -85,10 +89,16 @@ func (r *PaymentRepo) SavePayment(ctx context.Context, payment domain.Payment) e
 			for _, alloc := range payment.Allocations {
 				if _, err := br.Exec(); err != nil {
 					_ = br.Close()
+					if postgres.IsForeignKeyViolation(err) {
+						return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+					}
 					return fmt.Errorf("payment/postgres/payment_repo: insert allocation %s: %w", alloc.ID, err)
 				}
 			}
 			if err := br.Close(); err != nil {
+				if postgres.IsForeignKeyViolation(err) {
+					return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+				}
 				return fmt.Errorf("payment/postgres/payment_repo: close batch: %w", err)
 			}
 		}
@@ -98,7 +108,10 @@ func (r *PaymentRepo) SavePayment(ctx context.Context, payment domain.Payment) e
 }
 
 // FindPaymentByID retrieves a payment and its allocations by ID.
-func (r *PaymentRepo) FindPaymentByID(ctx context.Context, id string) (*domain.Payment, error) {
+func (r *PaymentRepo) FindPaymentByID(ctx context.Context, paymentID string) (*domain.Payment, error) {
+	if !id.IsValidUUID(paymentID) {
+		return nil, domain.ErrPaymentNotFound
+	}
 	const query = `
 		SELECT id, legal_entity_id, lease_id, tenant_id,
 		       amount_cents, unallocated_cents, method, label,
@@ -106,7 +119,7 @@ func (r *PaymentRepo) FindPaymentByID(ctx context.Context, id string) (*domain.P
 		FROM payments
 		WHERE id = $1
 	`
-	p, err := scanPayment(postgres.Conn(ctx, r.db).QueryRow(ctx, query, id))
+	p, err := scanPayment(postgres.Conn(ctx, r.db).QueryRow(ctx, query, paymentID))
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +133,9 @@ func (r *PaymentRepo) FindPaymentByID(ctx context.Context, id string) (*domain.P
 
 // ListPaymentsByLease returns all payments for a lease ordered by payment date ascending.
 func (r *PaymentRepo) ListPaymentsByLease(ctx context.Context, leaseID string) ([]domain.Payment, error) {
+	if !id.IsValidUUID(leaseID) {
+		return []domain.Payment{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, lease_id, tenant_id,
 		       amount_cents, unallocated_cents, method, label,
@@ -139,6 +155,9 @@ func (r *PaymentRepo) ListPaymentsByLease(ctx context.Context, leaseID string) (
 
 // ListPaymentsByEntity returns all payments for a legal entity ordered by payment date ascending.
 func (r *PaymentRepo) ListPaymentsByEntity(ctx context.Context, entityID string) ([]domain.Payment, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.Payment{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, lease_id, tenant_id,
 		       amount_cents, unallocated_cents, method, label,
@@ -198,13 +217,22 @@ func (r *PaymentRepo) listAllocationsByPayment(ctx context.Context, paymentID st
 }
 
 func (r *PaymentRepo) listAllocationsByPaymentIDs(ctx context.Context, paymentIDs []string) (map[string][]domain.RentAllocation, error) {
+	validIDs := make([]string, 0, len(paymentIDs))
+	for _, pid := range paymentIDs {
+		if id.IsValidUUID(pid) {
+			validIDs = append(validIDs, pid)
+		}
+	}
+	if len(validIDs) == 0 {
+		return map[string][]domain.RentAllocation{}, nil
+	}
 	const query = `
 		SELECT id, payment_id, rent_call_id, period_month, applied_cents, created_at
 		FROM rent_allocations
-		WHERE payment_id = ANY($1)
+		WHERE payment_id = ANY($1::uuid[])
 		ORDER BY created_at ASC
 	`
-	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, paymentIDs)
+	rows, err := postgres.Conn(ctx, r.db).Query(ctx, query, validIDs)
 	if err != nil {
 		return nil, fmt.Errorf("payment/postgres/payment_repo: list allocations for payments: %w", err)
 	}

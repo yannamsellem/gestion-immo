@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/lease/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -90,6 +91,9 @@ func (r *RentCallRepo) SaveRentCalls(ctx context.Context, calls []domain.RentCal
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					return domain.ErrDuplicatePeriod
 				}
+				if postgres.IsForeignKeyViolation(err) {
+					return fmt.Errorf("%w: referenced lease, legal entity, or tenant does not exist", domain.ErrValidation)
+				}
 				return fmt.Errorf("lease/postgres/rent_call_repo: save rent call %s: %w", rc.ID, err)
 			}
 		}
@@ -102,6 +106,9 @@ func (r *RentCallRepo) SaveRentCalls(ctx context.Context, calls []domain.RentCal
 
 // FindRentCallByLeaseAndPeriod retrieves a rent call by (lease_id, period_month).
 func (r *RentCallRepo) FindRentCallByLeaseAndPeriod(ctx context.Context, leaseID, periodMonth string) (*domain.RentCall, error) {
+	if !id.IsValidUUID(leaseID) {
+		return nil, domain.ErrRentCallNotFound
+	}
 	const query = `
 		SELECT id, lease_id, legal_entity_id, tenant_id, period_month,
 		       rent_net_cents, vat_cents, charges_cents, total_due_cents, remaining_due_cents,
@@ -115,6 +122,9 @@ func (r *RentCallRepo) FindRentCallByLeaseAndPeriod(ctx context.Context, leaseID
 
 // ListRentCallsByEntity lists all rent calls belonging to a legal entity.
 func (r *RentCallRepo) ListRentCallsByEntity(ctx context.Context, entityID string) ([]domain.RentCall, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.RentCall{}, nil
+	}
 	const query = `
 		SELECT id, lease_id, legal_entity_id, tenant_id, period_month,
 		       rent_net_cents, vat_cents, charges_cents, total_due_cents, remaining_due_cents,
@@ -134,6 +144,9 @@ func (r *RentCallRepo) ListRentCallsByEntity(ctx context.Context, entityID strin
 
 // ListRentCallsByLease lists all rent calls belonging to a lease.
 func (r *RentCallRepo) ListRentCallsByLease(ctx context.Context, leaseID string) ([]domain.RentCall, error) {
+	if !id.IsValidUUID(leaseID) {
+		return []domain.RentCall{}, nil
+	}
 	const query = `
 		SELECT id, lease_id, legal_entity_id, tenant_id, period_month,
 		       rent_net_cents, vat_cents, charges_cents, total_due_cents, remaining_due_cents,
@@ -153,6 +166,9 @@ func (r *RentCallRepo) ListRentCallsByLease(ctx context.Context, leaseID string)
 
 // ListUnpaidRentCallsByLease lists all unpaid/partially paid rent calls for a lease ordered oldest first.
 func (r *RentCallRepo) ListUnpaidRentCallsByLease(ctx context.Context, leaseID string) ([]domain.RentCall, error) {
+	if !id.IsValidUUID(leaseID) {
+		return []domain.RentCall{}, nil
+	}
 	query := `
 		SELECT id, lease_id, legal_entity_id, tenant_id, period_month,
 		       rent_net_cents, vat_cents, charges_cents, total_due_cents, remaining_due_cents,

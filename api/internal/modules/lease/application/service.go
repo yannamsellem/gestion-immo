@@ -22,7 +22,7 @@ type CreateTenantCmd struct {
 
 // TenantDTO is an immutable projection of a domain.Tenant.
 type TenantDTO struct {
-	ID         string     `json:"id"`
+	ID         string     `json:"id" format:"uuid"`
 	FullName   string     `json:"full_name"`
 	Email      string     `json:"email"`
 	Phone      string     `json:"phone"`
@@ -35,9 +35,9 @@ type TenantDTO struct {
 
 // CreateLeaseCmd carries the input for creating a residential or commercial lease.
 type CreateLeaseCmd struct {
-	LegalEntityID        string            `json:"legal_entity_id"`
-	LotID                string            `json:"lot_id"`
-	TenantID             string            `json:"tenant_id"`
+	LegalEntityID        string            `json:"legal_entity_id" format:"uuid"`
+	LotID                string            `json:"lot_id" format:"uuid"`
+	TenantID             string            `json:"tenant_id" format:"uuid"`
 	LeaseType            string            `json:"lease_type"`
 	RentNetCents         money.AmountCents `json:"rent_net_cents"`
 	ChargesCents         money.AmountCents `json:"charges_cents,omitempty"`
@@ -53,10 +53,10 @@ type CreateLeaseCmd struct {
 
 // LeaseDTO is an immutable projection of a domain.Lease.
 type LeaseDTO struct {
-	ID                   string            `json:"id"`
-	LegalEntityID        string            `json:"legal_entity_id"`
-	LotID                string            `json:"lot_id"`
-	TenantID             string            `json:"tenant_id"`
+	ID                   string            `json:"id" format:"uuid"`
+	LegalEntityID        string            `json:"legal_entity_id" format:"uuid"`
+	LotID                string            `json:"lot_id" format:"uuid"`
+	TenantID             string            `json:"tenant_id" format:"uuid"`
 	LeaseType            domain.LeaseType  `json:"lease_type"`
 	RentNetCents         money.AmountCents `json:"rent_net_cents"`
 	ChargesCents         money.AmountCents `json:"charges_cents"`
@@ -75,10 +75,10 @@ type LeaseDTO struct {
 
 // RentCallDTO is an immutable projection of a domain.RentCall.
 type RentCallDTO struct {
-	ID                string                `json:"id"`
-	LeaseID           string                `json:"lease_id"`
-	LegalEntityID     string                `json:"legal_entity_id"`
-	TenantID          string                `json:"tenant_id"`
+	ID                string                `json:"id" format:"uuid"`
+	LeaseID           string                `json:"lease_id" format:"uuid"`
+	LegalEntityID     string                `json:"legal_entity_id" format:"uuid"`
+	TenantID          string                `json:"tenant_id" format:"uuid"`
 	PeriodMonth       string                `json:"period_month"`
 	RentNetCents      money.AmountCents     `json:"rent_net_cents"`
 	VATCents          money.AmountCents     `json:"vat_cents"`
@@ -138,7 +138,7 @@ func (s *Service) CreateTenant(ctx context.Context, cmd CreateTenantCmd) (Tenant
 		return TenantDTO{}, fmt.Errorf("%w: full_name is required", domain.ErrValidation)
 	}
 
-	tenantID, err := id.Generate("ten")
+	tenantID, err := id.NewV7()
 	if err != nil {
 		return TenantDTO{}, err
 	}
@@ -168,6 +168,9 @@ func (s *Service) ArchiveTenant(ctx context.Context, tenantID string) error {
 	if trimmed == "" {
 		return fmt.Errorf("%w: tenant_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmed) {
+		return domain.ErrTenantNotFound
+	}
 	if _, err := s.tenantRepo.FindTenantByID(ctx, trimmed); err != nil {
 		return err
 	}
@@ -179,6 +182,9 @@ func (s *Service) GetTenantByID(ctx context.Context, tenantID string) (TenantDTO
 	trimmed := strings.TrimSpace(tenantID)
 	if trimmed == "" {
 		return TenantDTO{}, fmt.Errorf("%w: tenant_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmed) {
+		return TenantDTO{}, domain.ErrTenantNotFound
 	}
 	t, err := s.tenantRepo.FindTenantByID(ctx, trimmed)
 	if err != nil {
@@ -207,6 +213,9 @@ func (s *Service) CreateLease(ctx context.Context, cmd CreateLeaseCmd) (LeaseDTO
 	tenantID := strings.TrimSpace(cmd.TenantID)
 	if entityID == "" || lotID == "" || tenantID == "" {
 		return LeaseDTO{}, fmt.Errorf("%w: legal_entity_id, lot_id, and tenant_id are required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(entityID) || !id.IsValidUUID(lotID) || !id.IsValidUUID(tenantID) {
+		return LeaseDTO{}, fmt.Errorf("%w: legal_entity_id, lot_id, and tenant_id must be valid UUIDs", domain.ErrValidation)
 	}
 
 	if _, err := s.tenantRepo.FindTenantByID(ctx, tenantID); err != nil {
@@ -259,7 +268,7 @@ func (s *Service) CreateLease(ctx context.Context, cmd CreateLeaseCmd) (LeaseDTO
 		endDate = &endUTC
 	}
 
-	leaseID, err := id.Generate("lse")
+	leaseID, err := id.NewV7()
 	if err != nil {
 		return LeaseDTO{}, err
 	}
@@ -298,6 +307,9 @@ func (s *Service) GetLeaseByID(ctx context.Context, leaseID string) (LeaseDTO, e
 	if trimmed == "" {
 		return LeaseDTO{}, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmed) {
+		return LeaseDTO{}, domain.ErrLeaseNotFound
+	}
 	l, err := s.leaseRepo.FindLeaseByID(ctx, trimmed)
 	if err != nil {
 		return LeaseDTO{}, err
@@ -324,6 +336,9 @@ func (s *Service) ListLeasesByEntity(ctx context.Context, entityID string) ([]Le
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
+	}
 	leases, err := s.leaseRepo.ListLeasesByEntity(ctx, trimmed)
 	if err != nil {
 		return nil, err
@@ -342,6 +357,9 @@ func (s *Service) GenerateMonthlyRentCalls(ctx context.Context, entityID string,
 	trimmedPeriod := strings.TrimSpace(periodMonth)
 	if trimmedEntityID == "" || trimmedPeriod == "" {
 		return nil, fmt.Errorf("%w: entity_id and period_month are required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmedEntityID) {
+		return nil, fmt.Errorf("%w: invalid entity_id", domain.ErrValidation)
 	}
 
 	periodTime, err := time.Parse("2006-01", trimmedPeriod)
@@ -387,7 +405,7 @@ func (s *Service) GenerateMonthlyRentCalls(ctx context.Context, entityID string,
 				return err
 			}
 
-			rcID, err := id.Generate("rc")
+			rcID, err := id.NewV7()
 			if err != nil {
 				return err
 			}
@@ -456,6 +474,9 @@ func (s *Service) ListUnpaidRentCallsByLease(ctx context.Context, leaseID string
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: invalid lease_id", domain.ErrValidation)
+	}
 	return s.rentCallRepo.ListUnpaidRentCallsByLease(ctx, trimmed)
 }
 
@@ -469,6 +490,9 @@ func (s *Service) ListRentCallsByLease(ctx context.Context, leaseID string) ([]R
 	trimmed := strings.TrimSpace(leaseID)
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: invalid lease_id", domain.ErrValidation)
 	}
 	calls, err := s.rentCallRepo.ListRentCallsByLease(ctx, trimmed)
 	if err != nil {
@@ -486,6 +510,9 @@ func (s *Service) ListRentCallsByEntity(ctx context.Context, entityID string) ([
 	trimmed := strings.TrimSpace(entityID)
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: invalid legal_entity_id", domain.ErrValidation)
 	}
 	calls, err := s.rentCallRepo.ListRentCallsByEntity(ctx, trimmed)
 	if err != nil {

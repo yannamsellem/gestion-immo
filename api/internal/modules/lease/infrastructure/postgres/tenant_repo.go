@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/lease/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
 
@@ -47,24 +48,30 @@ func (r *TenantRepo) CreateTenant(ctx context.Context, tenant domain.Tenant) err
 }
 
 // FindTenantByID retrieves a tenant by primary key.
-func (r *TenantRepo) FindTenantByID(ctx context.Context, id string) (*domain.Tenant, error) {
+func (r *TenantRepo) FindTenantByID(ctx context.Context, tenantID string) (*domain.Tenant, error) {
+	if !id.IsValidUUID(tenantID) {
+		return nil, domain.ErrTenantNotFound
+	}
 	const query = `
 		SELECT id, full_name, email, phone, address, archived, archived_at, created_at, updated_at
 		FROM tenants
 		WHERE id = $1
 	`
-	row := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id)
+	row := postgres.Conn(ctx, r.db).QueryRow(ctx, query, tenantID)
 	return scanTenant(row)
 }
 
 // ArchiveTenant marks a tenant as archived with the given timestamp.
-func (r *TenantRepo) ArchiveTenant(ctx context.Context, id string, archivedAt time.Time) error {
+func (r *TenantRepo) ArchiveTenant(ctx context.Context, tenantID string, archivedAt time.Time) error {
+	if !id.IsValidUUID(tenantID) {
+		return domain.ErrTenantNotFound
+	}
 	const query = `
 		UPDATE tenants
 		SET archived = TRUE, archived_at = $2, updated_at = $2
 		WHERE id = $1
 	`
-	tag, err := postgres.Conn(ctx, r.db).Exec(ctx, query, id, archivedAt)
+	tag, err := postgres.Conn(ctx, r.db).Exec(ctx, query, tenantID, archivedAt)
 	if err != nil {
 		return fmt.Errorf("lease/postgres/tenant_repo: archive tenant: %w", err)
 	}

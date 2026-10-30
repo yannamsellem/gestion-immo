@@ -52,8 +52,8 @@ type cashJournalEntryOutput struct {
 
 // ImportPaymentsCSVBody represents the JSON request body for importing CSV/OFX payments.
 type ImportPaymentsCSVBody struct {
-	EntityID      string `json:"entity_id"`
-	LegalEntityID string `json:"legal_entity_id,omitempty"`
+	EntityID      string `json:"entity_id" format:"uuid"`
+	LegalEntityID string `json:"legal_entity_id,omitempty" format:"uuid"`
 	CSVContent    string `json:"csv_content"`
 	CSV           string `json:"csv,omitempty"`
 }
@@ -70,7 +70,7 @@ type batchImportResultOutput struct {
 }
 
 type entityIDInput struct {
-	ID string `path:"id"`
+	ID string `path:"id" format:"uuid"`
 }
 
 type negativePositionListOutput struct {

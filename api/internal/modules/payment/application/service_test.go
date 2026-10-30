@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -21,6 +22,7 @@ import (
 	paymentmemory "github.com/yannamsellem/gestion-immo/internal/modules/payment/infrastructure/memory"
 	paymenthttp "github.com/yannamsellem/gestion-immo/internal/modules/payment/interfaces/http"
 	paymentmcp "github.com/yannamsellem/gestion-immo/internal/modules/payment/interfaces/mcp"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/mcpserver"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 )
@@ -56,7 +58,7 @@ func seedTestLeaseWithRentCalls(t *testing.T, leaseSvc *leaseapp.Service, entity
 
 	lse, err := leaseSvc.CreateLease(ctx, leaseapp.CreateLeaseCmd{
 		LegalEntityID:   entityID,
-		LotID:           "lot_101",
+		LotID:           id.MustNewV7(),
 		TenantID:        tenant.ID,
 		LeaseType:       "RESIDENTIAL_UNFURNISHED",
 		RentNetCents:    money.AmountCents(750_00),
@@ -80,8 +82,9 @@ func seedTestLeaseWithRentCalls(t *testing.T, leaseSvc *leaseapp.Service, entity
 func TestImportPaymentsCSV_WholeEuroParsingAndExternalRefIdempotency(t *testing.T) {
 	paymentSvc, leaseSvc := newTestPaymentSuite()
 	ctx := context.Background()
+	entityID := id.MustNewV7()
 
-	lse := seedTestLeaseWithRentCalls(t, leaseSvc, "ent_csv_1", "2026-01", "2026-02")
+	lse := seedTestLeaseWithRentCalls(t, leaseSvc, entityID, "2026-01", "2026-02")
 
 	csvContent := strings.Join([]string{
 		"lease_id,amount_eur,label,payment_date,external_ref",
@@ -89,7 +92,7 @@ func TestImportPaymentsCSV_WholeEuroParsingAndExternalRefIdempotency(t *testing.
 		lse.ID + ",800 €,Loyer février 2026,2026-02-05,REF-FEB-001",
 	}, "\n")
 
-	res, err := paymentSvc.ImportPaymentsCSV(ctx, "ent_csv_1", strings.NewReader(csvContent))
+	res, err := paymentSvc.ImportPaymentsCSV(ctx, entityID, strings.NewReader(csvContent))
 	if err != nil {
 		t.Fatalf("ImportPaymentsCSV: %v", err)
 	}
@@ -108,7 +111,7 @@ func TestImportPaymentsCSV_WholeEuroParsingAndExternalRefIdempotency(t *testing.
 	}
 
 	// Re-importing the same external_ref values must be idempotent (0 new payments imported)
-	res2, err := paymentSvc.ImportPaymentsCSV(ctx, "ent_csv_1", strings.NewReader(csvContent))
+	res2, err := paymentSvc.ImportPaymentsCSV(ctx, entityID, strings.NewReader(csvContent))
 	if err != nil {
 		t.Fatalf("re-import CSV: %v", err)
 	}
@@ -120,8 +123,9 @@ func TestImportPaymentsCSV_WholeEuroParsingAndExternalRefIdempotency(t *testing.
 func TestImportPaymentsCSV_AtomicRollbackOnUnresolvableRow(t *testing.T) {
 	paymentSvc, leaseSvc := newTestPaymentSuite()
 	ctx := context.Background()
+	entityID := id.MustNewV7()
 
-	lse := seedTestLeaseWithRentCalls(t, leaseSvc, "ent_csv_atomic", "2026-01", "2026-02")
+	lse := seedTestLeaseWithRentCalls(t, leaseSvc, entityID, "2026-01", "2026-02")
 
 	// Row 1 has a valid lease_id; Row 2 has an empty lease_id and an unknown tenant label
 	csvContent := strings.Join([]string{
@@ -130,7 +134,7 @@ func TestImportPaymentsCSV_AtomicRollbackOnUnresolvableRow(t *testing.T) {
 		",800,VIR SEPA UNKNOWN TENANT,2026-02-05,REF-ROW-2",
 	}, "\n")
 
-	_, err := paymentSvc.ImportPaymentsCSV(ctx, "ent_csv_atomic", strings.NewReader(csvContent))
+	_, err := paymentSvc.ImportPaymentsCSV(ctx, entityID, strings.NewReader(csvContent))
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected ErrValidation when a row has an unresolvable lease_id, got %v", err)
 	}
@@ -149,8 +153,9 @@ func TestImportPaymentsCSV_AtomicRollbackOnUnresolvableRow(t *testing.T) {
 func TestRecordCashPaymentAndDeposit_CashJournalEntries(t *testing.T) {
 	paymentSvc, leaseSvc := newTestPaymentSuite()
 	ctx := context.Background()
+	entityID := id.MustNewV7()
 
-	lse := seedTestLeaseWithRentCalls(t, leaseSvc, "ent_cash_1", "2026-01")
+	lse := seedTestLeaseWithRentCalls(t, leaseSvc, entityID, "2026-01")
 
 	cashReceipt, err := paymentSvc.RecordCashPayment(ctx, application.RecordCashPaymentCmd{
 		LeaseID:       lse.ID,
@@ -167,7 +172,7 @@ func TestRecordCashPaymentAndDeposit_CashJournalEntries(t *testing.T) {
 	}
 
 	depositEntry, err := paymentSvc.RecordCashDepositToBank(ctx, application.RecordCashDepositCmd{
-		LegalEntityID: "ent_cash_1",
+		LegalEntityID: entityID,
 		AmountCents:   money.AmountCents(800_00),
 		Label:         "Remise espèces banque (530 -> 580 -> 512)",
 		EntryDate:     "2026-01-06",
@@ -179,7 +184,7 @@ func TestRecordCashPaymentAndDeposit_CashJournalEntries(t *testing.T) {
 		t.Fatalf("unexpected cash deposit entry: %+v", depositEntry)
 	}
 
-	entries, err := paymentSvc.ListCashJournalByEntity(ctx, "ent_cash_1")
+	entries, err := paymentSvc.ListCashJournalByEntity(ctx, entityID)
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("expected 2 cash journal entries, got %d (err=%v)", len(entries), err)
 	}
@@ -194,8 +199,9 @@ func TestRecordCashPaymentAndDeposit_CashJournalEntries(t *testing.T) {
 func TestImportPaymentsOFX_BankStatement(t *testing.T) {
 	paymentSvc, leaseSvc := newTestPaymentSuite()
 	ctx := context.Background()
+	entityID := id.MustNewV7()
 
-	lse := seedTestLeaseWithRentCalls(t, leaseSvc, "ent_ofx_1", "2026-01")
+	lse := seedTestLeaseWithRentCalls(t, leaseSvc, entityID, "2026-01")
 
 	ofxPayload := `<OFX>
 <BANKMSGSRSV1>
@@ -211,7 +217,7 @@ func TestImportPaymentsOFX_BankStatement(t *testing.T) {
 </BANKMSGSRSV1>
 </OFX>`
 
-	res, err := paymentSvc.ImportPaymentsCSV(ctx, "ent_ofx_1", strings.NewReader(ofxPayload))
+	res, err := paymentSvc.ImportPaymentsCSV(ctx, entityID, strings.NewReader(ofxPayload))
 	if err != nil {
 		t.Fatalf("ImportPaymentsCSV (OFX): %v", err)
 	}
@@ -225,7 +231,9 @@ func TestImportPaymentsOFX_BankStatement(t *testing.T) {
 
 func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 	paymentSvc, leaseSvc := newTestPaymentSuite()
-	lse := seedTestLeaseWithRentCalls(t, leaseSvc, "ent_http_1", "2026-01", "2026-02", "2026-03", "2026-04")
+	entityID := id.MustNewV7()
+	mcpUserID := id.MustNewV7()
+	lse := seedTestLeaseWithRentCalls(t, leaseSvc, entityID, "2026-01", "2026-02", "2026-03", "2026-04")
 
 	handler := paymenthttp.NewHandler(paymentSvc)
 	mux := http.NewServeMux()
@@ -253,7 +261,7 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 
 	// 3. POST /api/v1/payments/cash-deposit
 	reqDep := httptest.NewRequest(http.MethodPost, "/api/v1/payments/cash-deposit", strings.NewReader(
-		`{"legal_entity_id":"ent_http_1","amount_cents":80000,"label":"Remise banque","entry_date":"2026-01-06"}`,
+		`{"legal_entity_id":"`+entityID+`","amount_cents":80000,"label":"Remise banque","entry_date":"2026-01-06"}`,
 	))
 	recDep := httptest.NewRecorder()
 	mux.ServeHTTP(recDep, reqDep)
@@ -263,7 +271,7 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 
 	// 4. POST /api/v1/payments/import-csv
 	csvBody := "lease_id,amount_eur,label,payment_date,external_ref\n" + lse.ID + ",800,Loyer mars 2026,2026-03-05,REF-MAR-1\n"
-	reqCSV := httptest.NewRequest(http.MethodPost, "/api/v1/payments/import-csv?entity_id=ent_http_1", strings.NewReader(csvBody))
+	reqCSV := httptest.NewRequest(http.MethodPost, "/api/v1/payments/import-csv?entity_id="+entityID, strings.NewReader(csvBody))
 	reqCSV.Header.Set("Content-Type", "text/csv")
 	recCSV := httptest.NewRecorder()
 	mux.ServeHTTP(recCSV, reqCSV)
@@ -272,11 +280,11 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 	}
 
 	// 5. GET /api/v1/entities/{id}/negative-positions (2026-04 remains unpaid = 800_00)
-	reqNeg := httptest.NewRequest(http.MethodGet, "/api/v1/entities/ent_http_1/negative-positions", nil)
+	reqNeg := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID+"/negative-positions", nil)
 	recNeg := httptest.NewRecorder()
 	mux.ServeHTTP(recNeg, reqNeg)
 	if recNeg.Code != http.StatusOK {
-		t.Fatalf("GET /api/v1/entities/ent_http_1/negative-positions status = %d, body = %s", recNeg.Code, recNeg.Body.String())
+		t.Fatalf("GET /api/v1/entities/%s/negative-positions status = %d, body = %s", entityID, recNeg.Code, recNeg.Body.String())
 	}
 	var negPositions []application.NegativePositionDTO
 	if err := json.Unmarshal(recNeg.Body.Bytes(), &negPositions); err != nil {
@@ -287,11 +295,11 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 	}
 
 	// 6. GET /api/v1/entities/{id}/cash-journal
-	reqJournal := httptest.NewRequest(http.MethodGet, "/api/v1/entities/ent_http_1/cash-journal", nil)
+	reqJournal := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID+"/cash-journal", nil)
 	recJournal := httptest.NewRecorder()
 	mux.ServeHTTP(recJournal, reqJournal)
 	if recJournal.Code != http.StatusOK {
-		t.Fatalf("GET /api/v1/entities/ent_http_1/cash-journal status = %d, body = %s", recJournal.Code, recJournal.Body.String())
+		t.Fatalf("GET /api/v1/entities/%s/cash-journal status = %d, body = %s", entityID, recJournal.Code, recJournal.Body.String())
 	}
 	var journalEntries []application.CashJournalEntryDTO
 	if err := json.Unmarshal(recJournal.Body.Bytes(), &journalEntries); err != nil || len(journalEntries) != 2 {
@@ -299,8 +307,8 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 	}
 
 	// 7. Verify all 5 MCP tools (record_cash_payment, record_bank_payment, list_negative_positions, import_payments_batch, record_cash_deposit)
-	reg := mcpserver.NewRegistry(func(_ context.Context, token string) (string, error) {
-		return "usr_1", nil
+	reg := mcpserver.NewRegistry(func(_ context.Context, _ string) (string, error) {
+		return mcpUserID, nil
 	})
 	paymentmcp.RegisterTools(reg, paymentSvc)
 
@@ -322,7 +330,7 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 	}
 
 	// Call list_negative_positions, record_bank_payment, import_payments_batch, and record_cash_deposit via MCP JSON-RPC
-	mcpListBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_negative_positions","arguments":{"legal_entity_id":"ent_http_1"}}}`
+	mcpListBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_negative_positions","arguments":{"legal_entity_id":"` + entityID + `"}}}`
 	reqMCPList := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(mcpListBody))
 	reqMCPList.Header.Set("Authorization", "Bearer valid")
 	recMCPList := httptest.NewRecorder()
@@ -340,7 +348,7 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 		t.Fatalf("unexpected MCP record_bank_payment response (%d): %s", recMCPPay.Code, recMCPPay.Body.String())
 	}
 
-	mcpImportBody := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"import_payments_batch","arguments":{"legal_entity_id":"ent_http_1","csv_content":"lease_id,amount_eur,label,payment_date,external_ref\n` + lse.ID + `,800,Loyer mai 2026,2026-05-05,REF-MAY-MCP\n"}}}`
+	mcpImportBody := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"import_payments_batch","arguments":{"legal_entity_id":"` + entityID + `","csv_content":"lease_id,amount_eur,label,payment_date,external_ref\n` + lse.ID + `,800,Loyer mai 2026,2026-05-05,REF-MAY-MCP\n"}}}`
 	reqMCPImport := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(mcpImportBody))
 	reqMCPImport.Header.Set("Authorization", "Bearer valid")
 	recMCPImport := httptest.NewRecorder()
@@ -349,7 +357,7 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 		t.Fatalf("unexpected MCP import_payments_batch response (%d): %s", recMCPImport.Code, recMCPImport.Body.String())
 	}
 
-	mcpDepositBody := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"record_cash_deposit","arguments":{"legal_entity_id":"ent_http_1","amount_cents":50000,"label":"Remise MCP","entry_date":"2026-05-06"}}}`
+	mcpDepositBody := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"record_cash_deposit","arguments":{"legal_entity_id":"` + entityID + `","amount_cents":50000,"label":"Remise MCP","entry_date":"2026-05-06"}}}`
 	reqMCPDeposit := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(mcpDepositBody))
 	reqMCPDeposit.Header.Set("Authorization", "Bearer valid")
 	recMCPDeposit := httptest.NewRecorder()
@@ -362,6 +370,8 @@ func TestPaymentModule_AllHTTPAndMCPEndpoints(t *testing.T) {
 func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 	ctx := context.Background()
 	paymentSvc, leaseSvc := newTestPaymentSuite()
+	entityID := id.MustNewV7()
+	lotID := id.MustNewV7()
 
 	jeRepo := accountingmemory.NewJournalEntryRepo()
 	abRepo := accountingmemory.NewAccountBalanceRepo()
@@ -390,8 +400,8 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 	}
 
 	lse, err := leaseSvc.CreateLease(ctx, leaseapp.CreateLeaseCmd{
-		LegalEntityID:      "ent_auto_pcg",
-		LotID:              "lot_comm_1",
+		LegalEntityID:      entityID,
+		LotID:              lotID,
 		TenantID:           tenant.ID,
 		LeaseType:          "COMMERCIAL_3_6_9",
 		RentNetCents:       money.AmountCents(2000_00),
@@ -405,7 +415,7 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 		t.Fatalf("create lease: %v", err)
 	}
 
-	calls, err := leaseSvc.GenerateMonthlyRentCalls(ctx, "ent_auto_pcg", "2026-01")
+	calls, err := leaseSvc.GenerateMonthlyRentCalls(ctx, entityID, "2026-01")
 	if err != nil || len(calls) != 1 {
 		t.Fatalf("generate monthly rent calls: len=%d err=%v", len(calls), err)
 	}
@@ -422,7 +432,7 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 	}
 
 	if _, err := paymentSvc.RecordCashDepositToBank(ctx, application.RecordCashDepositCmd{
-		LegalEntityID: "ent_auto_pcg",
+		LegalEntityID: entityID,
 		AmountCents:   money.AmountCents(500_00),
 		Label:         "Remise espèces janvier 2026",
 		EntryDate:     "2026-01-07",
@@ -430,7 +440,7 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 		t.Fatalf("record cash deposit: %v", err)
 	}
 
-	entries, err := accSvc.ListJournalEntries(ctx, "ent_auto_pcg", 2026)
+	entries, err := accSvc.ListJournalEntries(ctx, entityID, 2026)
 	if err != nil {
 		t.Fatalf("list journal entries: %v", err)
 	}
@@ -438,7 +448,7 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 		t.Fatalf("expected 3 automatic journal entries (VE rent call, BQ payment, OD cash deposit), got %d: %+v", len(entries), entries)
 	}
 
-	fecBytes, err := accSvc.ExportEntityFEC(ctx, "ent_auto_pcg", 2026)
+	fecBytes, err := accSvc.ExportEntityFEC(ctx, entityID, 2026)
 	if err != nil {
 		t.Fatalf("export fec: %v", err)
 	}
@@ -447,5 +457,77 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 		if !strings.Contains(fecStr, code) {
 			t.Fatalf("expected FEC export to contain PCG account %s, got:\n%s", code, fecStr)
 		}
+	}
+}
+
+func TestPayment_UUIDv7IdentitiesCashReceiptFormatAndValidation(t *testing.T) {
+	paymentSvc, leaseSvc := newTestPaymentSuite()
+	ctx := context.Background()
+	entityID := id.MustNewV7()
+
+	lse := seedTestLeaseWithRentCalls(t, leaseSvc, entityID, "2026-01")
+
+	receipt, err := paymentSvc.RecordCashPayment(ctx, application.RecordCashPaymentCmd{
+		LeaseID:     lse.ID,
+		AmountCents: money.AmountCents(800_00),
+		Label:       "Loyer espèces janvier 2026",
+		PaymentDate: "2026-01-05",
+	})
+	if err != nil {
+		t.Fatalf("RecordCashPayment: %v", err)
+	}
+	if !id.IsValidUUID(receipt.ID) || receipt.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 PaymentReceiptDTO.ID, got %q", receipt.ID)
+	}
+	if !id.IsValidUUID(receipt.CashJournalEntryID) || receipt.CashJournalEntryID[14] != '7' {
+		t.Fatalf("expected UUIDv7 CashJournalEntryID, got %q", receipt.CashJournalEntryID)
+	}
+	if len(receipt.Allocations) != 1 || !id.IsValidUUID(receipt.Allocations[0].ID) || receipt.Allocations[0].ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 RentAllocation.ID, got %+v", receipt.Allocations)
+	}
+	receiptPattern := regexp.MustCompile(`^CAISSE-\d{8}-[0-9A-F]{6}$`)
+	if !receiptPattern.MatchString(receipt.ReceiptNumber) {
+		t.Fatalf("expected auto-generated cash ReceiptNumber matching ^CAISSE-\\d{8}-[0-9A-F]{6}$, got %q", receipt.ReceiptNumber)
+	}
+
+	deposit, err := paymentSvc.RecordCashDepositToBank(ctx, application.RecordCashDepositCmd{
+		LegalEntityID: entityID,
+		AmountCents:   money.AmountCents(800_00),
+		Label:         "Remise espèces",
+		EntryDate:     "2026-01-06",
+	})
+	if err != nil {
+		t.Fatalf("RecordCashDepositToBank: %v", err)
+	}
+	if !id.IsValidUUID(deposit.ID) || deposit.ID[14] != '7' {
+		t.Fatalf("expected UUIDv7 CashJournalEntryDTO.ID, got %q", deposit.ID)
+	}
+
+	if _, err := paymentSvc.RecordCashPayment(ctx, application.RecordCashPaymentCmd{
+		LeaseID:     "not-a-uuid",
+		AmountCents: money.AmountCents(100_00),
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed LeaseID in RecordCashPayment, got %v", err)
+	}
+	if _, err := paymentSvc.RecordBankPayment(ctx, application.RecordBankPaymentCmd{
+		LeaseID:     "not-a-uuid",
+		AmountCents: money.AmountCents(100_00),
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed LeaseID in RecordBankPayment, got %v", err)
+	}
+	if _, err := paymentSvc.RecordCashDepositToBank(ctx, application.RecordCashDepositCmd{
+		LegalEntityID: "not-a-uuid",
+		AmountCents:   money.AmountCents(100_00),
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed LegalEntityID in RecordCashDepositToBank, got %v", err)
+	}
+	if _, err := paymentSvc.ImportPaymentsCSV(ctx, "not-a-uuid", strings.NewReader("lease_id,amount_eur\n")); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed entityID in ImportPaymentsCSV, got %v", err)
+	}
+	if _, err := paymentSvc.ListNegativePositions(ctx, "not-a-uuid"); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed entityID in ListNegativePositions, got %v", err)
+	}
+	if _, err := paymentSvc.ListCashJournalByEntity(ctx, "not-a-uuid"); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation on malformed entityID in ListCashJournalByEntity, got %v", err)
 	}
 }

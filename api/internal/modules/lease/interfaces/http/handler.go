@@ -41,7 +41,7 @@ type tenantListOutput struct {
 }
 
 type archiveTenantInput struct {
-	ID string `path:"id"`
+	ID string `path:"id" format:"uuid"`
 }
 
 type createLeaseInput struct {
@@ -67,13 +67,13 @@ type GenerateRentCallsBody struct {
 }
 
 type generateRentCallsInput struct {
-	ID          string `path:"id"`
+	ID          string `path:"id" format:"uuid"`
 	PeriodMonth string `query:"period_month" required:"false"`
 	Body        GenerateRentCallsBody
 }
 
 type listEntityRentCallsInput struct {
-	ID          string `path:"id"`
+	ID          string `path:"id" format:"uuid"`
 	PeriodMonth string `query:"period_month" required:"false"`
 }
 

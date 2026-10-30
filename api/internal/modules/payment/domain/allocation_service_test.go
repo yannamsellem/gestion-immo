@@ -21,21 +21,25 @@ import (
 	paymentmemory "github.com/yannamsellem/gestion-immo/internal/modules/payment/infrastructure/memory"
 	paymenthttp "github.com/yannamsellem/gestion-immo/internal/modules/payment/interfaces/http"
 	paymentmcp "github.com/yannamsellem/gestion-immo/internal/modules/payment/interfaces/mcp"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/mcpserver"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 )
 
 func TestAllocatePayment_FIFOWhenNoMonthSpecified(t *testing.T) {
 	svc := domain.NewAllocationService()
+	rcJan := id.MustNewV7()
+	rcFeb := id.MustNewV7()
+	rcMar := id.MustNewV7()
 	unpaid := []leasedomain.RentCall{
-		{ID: "rc_jan", PeriodMonth: "2026-01", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
-		{ID: "rc_feb", PeriodMonth: "2026-02", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
-		{ID: "rc_mar", PeriodMonth: "2026-03", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
+		{ID: rcJan, PeriodMonth: "2026-01", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
+		{ID: rcFeb, PeriodMonth: "2026-02", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
+		{ID: rcMar, PeriodMonth: "2026-03", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
 	}
 
 	allocs, updated := svc.AllocatePayment(unpaid, money.AmountCents(800_00), "VIR SEPA M DUPONT", time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC))
-	if len(allocs) != 1 || allocs[0].RentCallID != "rc_jan" || allocs[0].AppliedCents != 800_00 {
-		t.Fatalf("expected FIFO allocation to rc_jan, got %+v", allocs)
+	if len(allocs) != 1 || allocs[0].RentCallID != rcJan || allocs[0].AppliedCents != 800_00 {
+		t.Fatalf("expected FIFO allocation to %s, got %+v", rcJan, allocs)
 	}
 	if updated[0].Status != leasedomain.StatusPaid || updated[1].Status != leasedomain.StatusUnpaid || updated[2].Status != leasedomain.StatusUnpaid {
 		t.Fatalf("expected Jan PAID and Feb/Mar UNPAID, got %+v", updated)
@@ -44,16 +48,19 @@ func TestAllocatePayment_FIFOWhenNoMonthSpecified(t *testing.T) {
 
 func TestAllocatePayment_ExplicitMonthWithOverpaymentSpillsToFIFO(t *testing.T) {
 	svc := domain.NewAllocationService()
+	rcJan := id.MustNewV7()
+	rcFeb := id.MustNewV7()
+	rcMar := id.MustNewV7()
 	unpaid := []leasedomain.RentCall{
-		{ID: "rc_jan", PeriodMonth: "2026-01", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
-		{ID: "rc_feb", PeriodMonth: "2026-02", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
-		{ID: "rc_mar", PeriodMonth: "2026-03", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
+		{ID: rcJan, PeriodMonth: "2026-01", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
+		{ID: rcFeb, PeriodMonth: "2026-02", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
+		{ID: rcMar, PeriodMonth: "2026-03", TotalDueCents: 800_00, RemainingDueCents: 800_00, Status: leasedomain.StatusUnpaid},
 	}
 
 	// Pays 800 EUR specifying "mars" -> March is paid, Jan & Feb remain unpaid
 	allocs, updated := svc.AllocatePayment(unpaid, money.AmountCents(800_00), "Virement loyer mars", time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC))
-	if len(allocs) != 1 || allocs[0].RentCallID != "rc_mar" {
-		t.Fatalf("expected allocation to rc_mar, got %+v", allocs)
+	if len(allocs) != 1 || allocs[0].RentCallID != rcMar {
+		t.Fatalf("expected allocation to %s, got %+v", rcMar, allocs)
 	}
 	if updated[2].Status != leasedomain.StatusPaid || updated[0].Status != leasedomain.StatusUnpaid || updated[1].Status != leasedomain.StatusUnpaid {
 		t.Fatalf("expected Mar PAID and Jan/Feb UNPAID, got %+v", updated)
@@ -61,7 +68,7 @@ func TestAllocatePayment_ExplicitMonthWithOverpaymentSpillsToFIFO(t *testing.T) 
 
 	// Overpayment case: pays 1000 EUR specifying "Loyer Mars 2026" -> 800 to Mar (PAID), remaining 200 to Jan via FIFO (PARTIAL, 600 remaining)
 	allocs2, updated2 := svc.AllocatePayment(unpaid, money.AmountCents(1000_00), "Virement Loyer Mars 2026", time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC))
-	if len(allocs2) != 2 || allocs2[0].RentCallID != "rc_mar" || allocs2[1].RentCallID != "rc_jan" || allocs2[1].AppliedCents != 200_00 {
+	if len(allocs2) != 2 || allocs2[0].RentCallID != rcMar || allocs2[1].RentCallID != rcJan || allocs2[1].AppliedCents != 200_00 {
 		t.Fatalf("expected Mar then Jan spillover, got %+v", allocs2)
 	}
 	if updated2[2].Status != leasedomain.StatusPaid || updated2[0].Status != leasedomain.StatusPartial || updated2[0].RemainingDueCents != 600_00 {
@@ -110,9 +117,11 @@ func TestPaymentModule_CashJournalCSVImportAndNegativePositions(t *testing.T) {
 		t.Fatalf("create tenant: %v", err)
 	}
 
+	entityID := id.MustNewV7()
+	lotID := id.MustNewV7()
 	lse, err := leaseSvc.CreateLease(ctx, leaseapp.CreateLeaseCmd{
-		LegalEntityID:   "ent_sci_yossi",
-		LotID:           "lot_101",
+		LegalEntityID:   entityID,
+		LotID:           lotID,
 		TenantID:        tenant.ID,
 		LeaseType:       "RESIDENTIAL_UNFURNISHED",
 		RentNetCents:    750_00,
@@ -125,7 +134,7 @@ func TestPaymentModule_CashJournalCSVImportAndNegativePositions(t *testing.T) {
 	}
 
 	for _, period := range []string{"2026-01", "2026-02", "2026-03"} {
-		if _, err := leaseSvc.GenerateMonthlyRentCalls(ctx, "ent_sci_yossi", period); err != nil {
+		if _, err := leaseSvc.GenerateMonthlyRentCalls(ctx, entityID, period); err != nil {
 			t.Fatalf("generate rent calls %s: %v", period, err)
 		}
 	}
@@ -139,7 +148,7 @@ func TestPaymentModule_CashJournalCSVImportAndNegativePositions(t *testing.T) {
 	handler := paymenthttp.NewHandler(svc)
 
 	// Verify DSP2 disabled by default
-	if _, err := svc.SyncOpenBankingDSP2(ctx, "ent_sci_yossi", time.Now()); !errors.Is(err, domain.ErrOpenBankingDisabled) {
+	if _, err := svc.SyncOpenBankingDSP2(ctx, entityID, time.Now()); !errors.Is(err, domain.ErrOpenBankingDisabled) {
 		t.Fatalf("expected ErrOpenBankingDisabled, got %v", err)
 	}
 
@@ -157,7 +166,7 @@ func TestPaymentModule_CashJournalCSVImportAndNegativePositions(t *testing.T) {
 		t.Fatalf("unexpected cash receipt allocations: %+v", cashReceipt)
 	}
 
-	journal, err := svc.ListCashJournalByEntity(ctx, "ent_sci_yossi")
+	journal, err := svc.ListCashJournalByEntity(ctx, entityID)
 	if err != nil || len(journal) != 1 {
 		t.Fatalf("expected 1 cash journal entry, got %d (%v)", len(journal), err)
 	}
@@ -166,7 +175,7 @@ func TestPaymentModule_CashJournalCSVImportAndNegativePositions(t *testing.T) {
 	}
 
 	// Check negative positions: Jan & Feb (1600 EUR) should still be unpaid and GLI eligible
-	negPositions, err := svc.ListNegativePositions(ctx, "ent_sci_yossi")
+	negPositions, err := svc.ListNegativePositions(ctx, entityID)
 	if err != nil || len(negPositions) != 1 {
 		t.Fatalf("expected 1 negative position, got %+v (%v)", negPositions, err)
 	}
@@ -176,7 +185,7 @@ func TestPaymentModule_CashJournalCSVImportAndNegativePositions(t *testing.T) {
 
 	// Import CSV batch paying 600.00 EUR using decimal EUR column (no month -> FIFO allocates to 2026-01)
 	csvData := "lease_id;amount;label;payment_date\n" + lse.ID + ";600,00;VIR SEPA JEAN DUPONT;2026-03-18\n"
-	batchRes, err := svc.ImportPaymentsCSV(ctx, "ent_sci_yossi", strings.NewReader(csvData))
+	batchRes, err := svc.ImportPaymentsCSV(ctx, entityID, strings.NewReader(csvData))
 	if err != nil {
 		t.Fatalf("import csv: %v", err)
 	}
@@ -188,7 +197,7 @@ func TestPaymentModule_CashJournalCSVImportAndNegativePositions(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/ent_sci_yossi/negative-positions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID+"/negative-positions", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

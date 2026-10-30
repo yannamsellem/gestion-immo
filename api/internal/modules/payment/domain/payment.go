@@ -30,9 +30,9 @@ func (m PaymentMethod) IsValid() bool {
 // RentAllocation records how a slice of a payment was applied to a specific monthly RentCall.
 // It is a child entity owned by the Payment aggregate root.
 type RentAllocation struct {
-	ID           string            `json:"id"`
-	PaymentID    string            `json:"payment_id"`
-	RentCallID   string            `json:"rent_call_id"`
+	ID           string            `json:"id" format:"uuid"`
+	PaymentID    string            `json:"payment_id" format:"uuid"`
+	RentCallID   string            `json:"rent_call_id" format:"uuid"`
 	PeriodMonth  string            `json:"period_month"`
 	AppliedCents money.AmountCents `json:"applied_cents"`
 	CreatedAt    time.Time         `json:"created_at"`

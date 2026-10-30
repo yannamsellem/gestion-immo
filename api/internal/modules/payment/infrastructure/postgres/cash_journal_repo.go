@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/payment/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -45,6 +46,9 @@ func (r *CashJournalRepo) SaveCashJournalEntry(ctx context.Context, entry domain
 		entry.CreatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced record does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("payment/postgres/cash_journal_repo: save cash journal entry: %w", err)
 	}
 	return nil
@@ -52,6 +56,9 @@ func (r *CashJournalRepo) SaveCashJournalEntry(ctx context.Context, entry domain
 
 // ListCashJournalByEntity lists all PCG 530 Cash Journal entries for a legal entity ordered chronologically.
 func (r *CashJournalRepo) ListCashJournalByEntity(ctx context.Context, entityID string) ([]domain.CashJournalEntry, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.CashJournalEntry{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, payment_id, account_code, counterpart_account_code,
 		       entry_type, label, debit_cents, credit_cents, receipt_number, entry_date, created_at

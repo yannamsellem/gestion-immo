@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"sort"
@@ -26,7 +28,7 @@ type LeasePort interface {
 
 // RecordCashPaymentCmd carries the input for recording a tenant cash rent payment (PCG 530 Caisse).
 type RecordCashPaymentCmd struct {
-	LeaseID       string            `json:"lease_id"`
+	LeaseID       string            `json:"lease_id" format:"uuid"`
 	AmountCents   money.AmountCents `json:"amount_cents"`
 	Label         string            `json:"label"`
 	ReceiptNumber string            `json:"receipt_number,omitempty"`
@@ -35,7 +37,7 @@ type RecordCashPaymentCmd struct {
 
 // RecordBankPaymentCmd carries the input for recording a bank transfer, check, or direct debit rent payment.
 type RecordBankPaymentCmd struct {
-	LeaseID     string            `json:"lease_id"`
+	LeaseID     string            `json:"lease_id" format:"uuid"`
 	AmountCents money.AmountCents `json:"amount_cents"`
 	Method      string            `json:"method,omitempty"`
 	Label       string            `json:"label"`
@@ -45,7 +47,7 @@ type RecordBankPaymentCmd struct {
 
 // RecordCashDepositCmd carries the input for depositing cash from PCG 530 (Caisse) to PCG 580/512 (Banque).
 type RecordCashDepositCmd struct {
-	LegalEntityID string            `json:"legal_entity_id"`
+	LegalEntityID string            `json:"legal_entity_id" format:"uuid"`
 	AmountCents   money.AmountCents `json:"amount_cents"`
 	Label         string            `json:"label"`
 	EntryDate     string            `json:"entry_date,omitempty"`
@@ -53,10 +55,10 @@ type RecordCashDepositCmd struct {
 
 // PaymentReceiptDTO is an immutable projection of a recorded Payment and its RentAllocations.
 type PaymentReceiptDTO struct {
-	ID                 string                  `json:"id"`
-	LegalEntityID      string                  `json:"legal_entity_id"`
-	LeaseID            string                  `json:"lease_id"`
-	TenantID           string                  `json:"tenant_id"`
+	ID                 string                  `json:"id" format:"uuid"`
+	LegalEntityID      string                  `json:"legal_entity_id" format:"uuid"`
+	LeaseID            string                  `json:"lease_id" format:"uuid"`
+	TenantID           string                  `json:"tenant_id" format:"uuid"`
 	AmountCents        money.AmountCents       `json:"amount_cents"`
 	UnallocatedCents   money.AmountCents       `json:"unallocated_cents"`
 	Method             domain.PaymentMethod    `json:"method"`
@@ -65,15 +67,15 @@ type PaymentReceiptDTO struct {
 	ReceiptNumber      string                  `json:"receipt_number,omitempty"`
 	PaymentDate        time.Time               `json:"payment_date"`
 	Allocations        []domain.RentAllocation `json:"allocations"`
-	CashJournalEntryID string                  `json:"cash_journal_entry_id,omitempty"`
+	CashJournalEntryID string                  `json:"cash_journal_entry_id,omitempty" format:"uuid"`
 	CreatedAt          time.Time               `json:"created_at"`
 }
 
 // CashJournalEntryDTO is an immutable projection of a PCG 530 Cash Journal entry.
 type CashJournalEntryDTO struct {
-	ID                     string               `json:"id"`
-	LegalEntityID          string               `json:"legal_entity_id"`
-	PaymentID              *string              `json:"payment_id,omitempty"`
+	ID                     string               `json:"id" format:"uuid"`
+	LegalEntityID          string               `json:"legal_entity_id" format:"uuid"`
+	PaymentID              *string              `json:"payment_id,omitempty" format:"uuid"`
 	AccountCode            string               `json:"account_code"`
 	CounterpartAccountCode string               `json:"counterpart_account_code"`
 	EntryType              domain.CashEntryType `json:"entry_type"`
@@ -87,7 +89,7 @@ type CashJournalEntryDTO struct {
 
 // BatchImportResultDTO summarizes a CSV/OFX or Open Banking DSP2 batch import.
 type BatchImportResultDTO struct {
-	EntityID           string              `json:"entity_id"`
+	EntityID           string              `json:"entity_id" format:"uuid"`
 	ImportedCount      int                 `json:"imported_count"`
 	TotalImportedCents money.AmountCents   `json:"total_imported_cents"`
 	Payments           []PaymentReceiptDTO `json:"payments"`
@@ -95,10 +97,10 @@ type BatchImportResultDTO struct {
 
 // NegativePositionDTO represents a lease with unpaid rent calls (situation locative débitrice).
 type NegativePositionDTO struct {
-	LeaseID          string            `json:"lease_id"`
-	LegalEntityID    string            `json:"legal_entity_id"`
-	LotID            string            `json:"lot_id"`
-	TenantID         string            `json:"tenant_id"`
+	LeaseID          string            `json:"lease_id" format:"uuid"`
+	LegalEntityID    string            `json:"legal_entity_id" format:"uuid"`
+	LotID            string            `json:"lot_id" format:"uuid"`
+	TenantID         string            `json:"tenant_id" format:"uuid"`
 	TenantName       string            `json:"tenant_name"`
 	TotalUnpaidCents money.AmountCents `json:"total_unpaid_cents"`
 	UnpaidMonths     []string          `json:"unpaid_months"`
@@ -169,6 +171,9 @@ func (s *Service) RecordCashPayment(ctx context.Context, cmd RecordCashPaymentCm
 	if leaseID == "" {
 		return PaymentReceiptDTO{}, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(leaseID) {
+		return PaymentReceiptDTO{}, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
+	}
 	if cmd.AmountCents <= 0 {
 		return PaymentReceiptDTO{}, fmt.Errorf("%w: amount_cents must be strictly positive", domain.ErrValidation)
 	}
@@ -185,11 +190,11 @@ func (s *Service) RecordCashPayment(ctx context.Context, cmd RecordCashPaymentCm
 
 	receiptNum := strings.TrimSpace(cmd.ReceiptNumber)
 	if receiptNum == "" {
-		suffix, err := id.Generate("rcu")
+		suffix, err := generateCashReceiptSuffix()
 		if err != nil {
 			return PaymentReceiptDTO{}, err
 		}
-		receiptNum = fmt.Sprintf("CAISSE-%s-%s", paymentDate.Format("20060102"), suffix[len(suffix)-6:])
+		receiptNum = fmt.Sprintf("CAISSE-%s-%s", paymentDate.Format("20060102"), suffix)
 	}
 
 	label := strings.TrimSpace(cmd.Label)
@@ -214,7 +219,7 @@ func (s *Service) RecordCashPayment(ctx context.Context, cmd RecordCashPaymentCm
 			return err
 		}
 
-		cashEntryID, err := id.Generate("cje")
+		cashEntryID, err := id.NewV7()
 		if err != nil {
 			return err
 		}
@@ -267,6 +272,9 @@ func (s *Service) RecordBankPayment(ctx context.Context, cmd RecordBankPaymentCm
 	leaseID := strings.TrimSpace(cmd.LeaseID)
 	if leaseID == "" {
 		return PaymentReceiptDTO{}, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(leaseID) {
+		return PaymentReceiptDTO{}, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
 	}
 	if cmd.AmountCents <= 0 {
 		return PaymentReceiptDTO{}, fmt.Errorf("%w: amount_cents must be strictly positive", domain.ErrValidation)
@@ -341,6 +349,9 @@ func (s *Service) RecordCashDepositToBank(ctx context.Context, cmd RecordCashDep
 	if entityID == "" {
 		return CashJournalEntryDTO{}, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(entityID) {
+		return CashJournalEntryDTO{}, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
+	}
 	if cmd.AmountCents <= 0 {
 		return CashJournalEntryDTO{}, fmt.Errorf("%w: amount_cents must be strictly positive", domain.ErrValidation)
 	}
@@ -350,7 +361,7 @@ func (s *Service) RecordCashDepositToBank(ctx context.Context, cmd RecordCashDep
 		return CashJournalEntryDTO{}, err
 	}
 
-	entryID, err := id.Generate("cje")
+	entryID, err := id.NewV7()
 	if err != nil {
 		return CashJournalEntryDTO{}, err
 	}
@@ -396,6 +407,9 @@ func (s *Service) ListCashJournalByEntity(ctx context.Context, entityID string) 
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: legal_entity_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: legal_entity_id must be a valid UUID", domain.ErrValidation)
+	}
 	entries, err := s.cashJournal.ListCashJournalByEntity(ctx, trimmed)
 	if err != nil {
 		return nil, err
@@ -412,6 +426,9 @@ func (s *Service) ListPaymentsByLease(ctx context.Context, leaseID string) ([]Pa
 	trimmed := strings.TrimSpace(leaseID)
 	if trimmed == "" {
 		return nil, fmt.Errorf("%w: lease_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmed) {
+		return nil, fmt.Errorf("%w: lease_id must be a valid UUID", domain.ErrValidation)
 	}
 	payments, err := s.payments.ListPaymentsByLease(ctx, trimmed)
 	if err != nil {
@@ -431,6 +448,9 @@ func (s *Service) ImportPaymentsCSV(ctx context.Context, entityID string, r io.R
 	if trimmedEntityID == "" {
 		return BatchImportResultDTO{}, fmt.Errorf("%w: entity_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmedEntityID) {
+		return BatchImportResultDTO{}, fmt.Errorf("%w: entity_id must be a valid UUID", domain.ErrValidation)
+	}
 	if s.csvImporter == nil {
 		return BatchImportResultDTO{}, fmt.Errorf("%w: statement importer is not configured", domain.ErrValidation)
 	}
@@ -449,6 +469,9 @@ func (s *Service) SyncOpenBankingDSP2(ctx context.Context, entityID string, sinc
 	if trimmedEntityID == "" {
 		return BatchImportResultDTO{}, fmt.Errorf("%w: entity_id is required", domain.ErrValidation)
 	}
+	if !id.IsValidUUID(trimmedEntityID) {
+		return BatchImportResultDTO{}, fmt.Errorf("%w: entity_id must be a valid UUID", domain.ErrValidation)
+	}
 	if s.bankProvider == nil || !s.bankProvider.Enabled() {
 		return BatchImportResultDTO{}, domain.ErrOpenBankingDisabled
 	}
@@ -465,6 +488,9 @@ func (s *Service) ListNegativePositions(ctx context.Context, entityID string) ([
 	trimmedEntityID := strings.TrimSpace(entityID)
 	if trimmedEntityID == "" {
 		return nil, fmt.Errorf("%w: entity_id is required", domain.ErrValidation)
+	}
+	if !id.IsValidUUID(trimmedEntityID) {
+		return nil, fmt.Errorf("%w: entity_id must be a valid UUID", domain.ErrValidation)
 	}
 
 	leases, err := s.leaseSvc.ListLeasesByEntity(ctx, trimmedEntityID)
@@ -568,6 +594,9 @@ func (s *Service) processBankRows(
 		}
 		if leaseID == "" {
 			return BatchImportResultDTO{}, fmt.Errorf("%w: could not resolve lease_id for bank transaction %q", domain.ErrValidation, row.Label)
+		}
+		if !id.IsValidUUID(leaseID) {
+			return BatchImportResultDTO{}, fmt.Errorf("%w: invalid lease_id %q in bank transaction", domain.ErrValidation, leaseID)
 		}
 		lease, ok := leasesByID[leaseID]
 		if !ok {
@@ -708,7 +737,7 @@ func (s *Service) allocateAndPersistPayment(
 		}
 	}
 
-	paymentID, err := id.Generate("pay")
+	paymentID, err := id.NewV7()
 	if err != nil {
 		return PaymentReceiptDTO{}, err
 	}
@@ -716,7 +745,7 @@ func (s *Service) allocateAndPersistPayment(
 	now := time.Now().UTC()
 	var totalApplied money.AmountCents
 	for i := range allocs {
-		allocID, err := id.Generate("alc")
+		allocID, err := id.NewV7()
 		if err != nil {
 			return PaymentReceiptDTO{}, err
 		}
@@ -809,5 +838,13 @@ func parsePaymentDateOrNow(raw string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("%w: invalid payment_date %q (expected YYYY-MM-DD)", domain.ErrValidation, raw)
+}
+
+func generateCashReceiptSuffix() (string, error) {
+	bytes := make([]byte, 3)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("payment/application: generate cash receipt suffix: %w", err)
+	}
+	return strings.ToUpper(hex.EncodeToString(bytes)), nil
 }
 

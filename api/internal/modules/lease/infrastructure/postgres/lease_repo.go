@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yannamsellem/gestion-immo/internal/modules/lease/domain"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/postgres"
 )
@@ -58,13 +59,19 @@ func (r *LeaseRepo) CreateLease(ctx context.Context, lease domain.Lease) error {
 		lease.UpdatedAt,
 	)
 	if err != nil {
+		if postgres.IsForeignKeyViolation(err) {
+			return fmt.Errorf("%w: referenced legal entity, lot, or tenant does not exist", domain.ErrValidation)
+		}
 		return fmt.Errorf("lease/postgres/lease_repo: create lease: %w", err)
 	}
 	return nil
 }
 
 // FindLeaseByID retrieves a lease by primary key.
-func (r *LeaseRepo) FindLeaseByID(ctx context.Context, id string) (*domain.Lease, error) {
+func (r *LeaseRepo) FindLeaseByID(ctx context.Context, leaseID string) (*domain.Lease, error) {
+	if !id.IsValidUUID(leaseID) {
+		return nil, domain.ErrLeaseNotFound
+	}
 	const query = `
 		SELECT id, legal_entity_id, lot_id, tenant_id, lease_type,
 		       rent_net_cents, charges_cents, subject_to_vat, vat_rate_basis_points,
@@ -73,7 +80,7 @@ func (r *LeaseRepo) FindLeaseByID(ctx context.Context, id string) (*domain.Lease
 		FROM leases
 		WHERE id = $1
 	`
-	row := postgres.Conn(ctx, r.db).QueryRow(ctx, query, id)
+	row := postgres.Conn(ctx, r.db).QueryRow(ctx, query, leaseID)
 	return scanLease(row)
 }
 
@@ -109,6 +116,9 @@ func (r *LeaseRepo) ListLeases(ctx context.Context) ([]domain.Lease, error) {
 
 // ListLeasesByEntity lists all leases belonging to a legal entity.
 func (r *LeaseRepo) ListLeasesByEntity(ctx context.Context, entityID string) ([]domain.Lease, error) {
+	if !id.IsValidUUID(entityID) {
+		return []domain.Lease{}, nil
+	}
 	const query = `
 		SELECT id, legal_entity_id, lot_id, tenant_id, lease_type,
 		       rent_net_cents, charges_cents, subject_to_vat, vat_rate_basis_points,

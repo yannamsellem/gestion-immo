@@ -23,6 +23,7 @@ import (
 	paymentapp "github.com/yannamsellem/gestion-immo/internal/modules/payment/application"
 	"github.com/yannamsellem/gestion-immo/internal/modules/portfolio"
 	"github.com/yannamsellem/gestion-immo/internal/platform/config"
+	"github.com/yannamsellem/gestion-immo/internal/platform/id"
 	"github.com/yannamsellem/gestion-immo/internal/platform/money"
 	"github.com/yannamsellem/gestion-immo/internal/platform/r2"
 	"github.com/yannamsellem/gestion-immo/internal/platform/templating"
@@ -142,6 +143,9 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 	leaseMod.Service().WithAccountingRecorder(accountingMod.Service())
 	paymentMod.Service().WithAccountingRecorder(accountingMod.Service())
 
+	entityID := id.MustNewV7()
+	lotID := id.MustNewV7()
+
 	tenant, err := leaseMod.Service().CreateTenant(ctx, leaseapp.CreateTenantCmd{
 		FullName: "DUPONT LOCATAIRE",
 		Email:    "dupont@example.fr",
@@ -151,8 +155,8 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 	}
 
 	lse, err := leaseMod.Service().CreateLease(ctx, leaseapp.CreateLeaseCmd{
-		LegalEntityID: "ent_main_auto",
-		LotID:         "lot_1",
+		LegalEntityID: entityID,
+		LotID:         lotID,
 		TenantID:      tenant.ID,
 		LeaseType:     "RESIDENTIAL_UNFURNISHED",
 		RentNetCents:  money.AmountCents(900_00),
@@ -164,7 +168,7 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 		t.Fatalf("create lease: %v", err)
 	}
 
-	calls, err := leaseMod.Service().GenerateMonthlyRentCalls(ctx, "ent_main_auto", "2026-01")
+	calls, err := leaseMod.Service().GenerateMonthlyRentCalls(ctx, entityID, "2026-01")
 	if err != nil || len(calls) != 1 {
 		t.Fatalf("generate rent calls: len=%d err=%v", len(calls), err)
 	}
@@ -178,12 +182,12 @@ func TestAutomaticAccountingPosting_RentCallAndPayment(t *testing.T) {
 		t.Fatalf("record cash payment: %v", err)
 	}
 
-	entries, err := accountingMod.Service().ListJournalEntries(ctx, "ent_main_auto", 2026)
+	entries, err := accountingMod.Service().ListJournalEntries(ctx, entityID, 2026)
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("expected 2 automatic journal entries (VE + CA), got %d (err=%v)", len(entries), err)
 	}
 
-	fecBytes, err := accountingMod.Service().ExportEntityFEC(ctx, "ent_main_auto", 2026)
+	fecBytes, err := accountingMod.Service().ExportEntityFEC(ctx, entityID, 2026)
 	if err != nil {
 		t.Fatalf("export fec: %v", err)
 	}
