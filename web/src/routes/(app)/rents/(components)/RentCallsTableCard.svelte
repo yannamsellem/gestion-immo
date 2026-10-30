@@ -1,25 +1,3 @@
-<script lang="ts" module>
-	import type { LeaseDTO, RentCallDTO } from '#lib/modules/lease/types';
-	import type { NegativePositionDTO } from '#lib/modules/payment/types';
-	import type { LegalEntityDTO } from '#lib/modules/portfolio/types';
-
-	export type RentStatusFilter = 'ALL' | 'TO_COLLECT' | 'OVERDUE' | 'PAID';
-
-	export interface UnifiedRentRow {
-		lease: LeaseDTO;
-		entity: LegalEntityDTO;
-		propertyAndLotLabel: string;
-		tenantName: string;
-		rentCall: RentCallDTO | null;
-		negativePosition: NegativePositionDTO | null;
-		expectedGrossCents: number;
-		remainingDueCents: number;
-		statusCategory: 'PAID' | 'OVERDUE' | 'TO_COLLECT';
-		statusBadgeLabel: string;
-		statusBadgeVariant: 'default' | 'secondary' | 'destructive' | 'outline';
-	}
-</script>
-
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import IconReceiptEuro from '@tabler/icons-svelte/icons/receipt-euro';
@@ -30,6 +8,7 @@
 	import * as Table from '#lib/components/ui/table/index.js';
 	import * as ToggleGroup from '#lib/components/ui/toggle-group/index.js';
 	import { formatCentsToEuro } from '#lib/core/formatters/money';
+	import type { RentStatusFilter, UnifiedRentRow } from './rent-rows';
 
 	let {
 		rows,

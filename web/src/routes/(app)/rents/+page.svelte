@@ -14,16 +14,17 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Spinner } from '#lib/components/ui/spinner/index.js';
 	import { workspaceStore } from '#lib/core/workspace/workspace.svelte';
-	import type { RentCallDTO } from '#lib/modules/lease/types';
-	import type { NegativePositionDTO } from '#lib/modules/payment/types';
-	import type { PageProps } from './$types';
 	import ImportPaymentsCsvDialog from './(components)/ImportPaymentsCsvDialog.svelte';
 	import RentActionSheet from './(components)/RentActionSheet.svelte';
-	import RentCallsTableCard, {
-		type RentStatusFilter,
-		type UnifiedRentRow
-	} from './(components)/RentCallsTableCard.svelte';
+	import RentCallsTableCard from './(components)/RentCallsTableCard.svelte';
 	import RentsMetricsGrid from './(components)/RentsMetricsGrid.svelte';
+	import {
+		type RentStatusFilter,
+		type UnifiedRentRow,
+		buildUnifiedRentRows,
+		summarizeRentRows
+	} from './(components)/rent-rows';
+	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 
@@ -39,95 +40,20 @@
 		workspaceStore.selectedEntityId !== 'ALL' ? workspaceStore.selectedEntityId : ''
 	);
 
-	const unifiedRows = $derived.by((): UnifiedRentRow[] => {
-		const entityMap = new Map(data.entities.map((entity) => [entity.id, entity]));
-		const tenantMap = new Map(data.tenants.map((tenant) => [tenant.id, tenant]));
-		const lotLabelMap = new Map<string, string>(
-			Object.values(data.propertiesByEntity).flatMap((propList) =>
-				propList.flatMap((prop) =>
-					(prop.lots ?? []).map((lot) => [lot.id, `${prop.label} — ${lot.label}`] as const)
-				)
-			)
-		);
-		const rentCallByLeaseId = new Map<string, RentCallDTO>(
-			Object.values(data.rentCallsByEntity).flatMap((callList) =>
-				callList
-					.filter((rc) => rc.period_month === workspaceStore.selectedPeriodMonth)
-					.map((rc) => [rc.lease_id, rc] as const)
-			)
-		);
-		const negativeByLeaseId = new Map<string, NegativePositionDTO>(
-			Object.values(data.negativePositionsByEntity).flatMap((negList) =>
-				negList.map((neg) => [neg.lease_id, neg] as const)
-			)
-		);
-
-		return data.leases
-			.filter(
-				(lease) =>
-					workspaceStore.selectedEntityId === 'ALL' ||
-					lease.legal_entity_id === workspaceStore.selectedEntityId
-			)
-			.map((lease) => {
-				const entity = entityMap.get(lease.legal_entity_id) ?? data.entities[0];
-				const rentCall = rentCallByLeaseId.get(lease.id) ?? null;
-				const negativePosition = negativeByLeaseId.get(lease.id) ?? null;
-				const vatCents = lease.subject_to_vat
-					? Math.trunc((lease.rent_net_cents * lease.vat_rate_basis_points) / 10000)
-					: 0;
-				const expectedGrossCents = rentCall
-					? rentCall.total_due_cents
-					: lease.rent_net_cents + vatCents + lease.charges_cents;
-				const remainingDueCents = rentCall ? rentCall.remaining_due_cents : expectedGrossCents;
-
-				let statusCategory: 'PAID' | 'OVERDUE' | 'TO_COLLECT' = 'TO_COLLECT';
-				let statusBadgeLabel = 'Appel à générer';
-				let statusBadgeVariant: 'default' | 'secondary' | 'destructive' | 'outline' = 'outline';
-
-				if (negativePosition && negativePosition.total_unpaid_cents > 0) {
-					statusCategory = 'OVERDUE';
-					statusBadgeLabel = `Impayé (${negativePosition.unpaid_months.length} m.)`;
-					statusBadgeVariant = 'destructive';
-				} else if (
-					rentCall?.status === 'PAID' ||
-					(rentCall && rentCall.remaining_due_cents === 0)
-				) {
-					statusCategory = 'PAID';
-					statusBadgeLabel = 'Soldé';
-					statusBadgeVariant = 'secondary';
-				} else if (rentCall?.status === 'PARTIAL') {
-					statusBadgeLabel = 'Partiel';
-					statusBadgeVariant = 'default';
-				} else if (rentCall) {
-					statusBadgeLabel = 'En attente';
-				}
-
-				return {
-					lease,
-					entity,
-					propertyAndLotLabel: lotLabelMap.get(lease.lot_id) ?? `Lot ${lease.lot_id.slice(0, 8)}`,
-					tenantName: tenantMap.get(lease.tenant_id)?.full_name ?? 'Locataire',
-					rentCall,
-					negativePosition,
-					expectedGrossCents,
-					remainingDueCents,
-					statusCategory,
-					statusBadgeLabel,
-					statusBadgeVariant
-				};
-			});
-	});
-
-	const expectedTotalCents = $derived(
-		unifiedRows.reduce((sum, row) => sum + row.expectedGrossCents, 0)
+	const unifiedRows = $derived(
+		buildUnifiedRentRows({
+			entities: data.entities,
+			leases: data.leases,
+			tenants: data.tenants,
+			propertiesByEntity: data.propertiesByEntity,
+			rentCallsByEntity: data.rentCallsByEntity,
+			negativePositionsByEntity: data.negativePositionsByEntity,
+			selectedEntityId: workspaceStore.selectedEntityId,
+			selectedPeriodMonth: workspaceStore.selectedPeriodMonth
+		})
 	);
-	const remainingTotalCents = $derived(
-		unifiedRows.reduce((sum, row) => sum + row.remainingDueCents, 0)
-	);
-	const collectedTotalCents = $derived(Math.max(0, expectedTotalCents - remainingTotalCents));
-	const overdueCount = $derived(
-		unifiedRows.filter((row) => row.statusCategory === 'OVERDUE').length
-	);
+
+	const summary = $derived(summarizeRentRows(unifiedRows));
 	const selectedRow = $derived(unifiedRows.find((row) => row.lease.id === selectedLeaseId) ?? null);
 
 	$effect(() => {
@@ -237,7 +163,12 @@
 	</Alert.Root>
 {/if}
 
-<RentsMetricsGrid {expectedTotalCents} {collectedTotalCents} {remainingTotalCents} {overdueCount} />
+<RentsMetricsGrid
+	expectedTotalCents={summary.expectedTotalCents}
+	collectedTotalCents={summary.collectedTotalCents}
+	remainingTotalCents={summary.remainingTotalCents}
+	overdueCount={summary.overdueCount}
+/>
 
 <RentCallsTableCard rows={unifiedRows} bind:statusFilter onOpenRow={openRowSheet} />
 
