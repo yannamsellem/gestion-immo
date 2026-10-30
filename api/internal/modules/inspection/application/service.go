@@ -126,7 +126,7 @@ type CreateIncidentCmd struct {
 
 // UpdateIncidentCmd carries the input for updating an incident's status, claim number, cost, observations, or photos.
 type UpdateIncidentCmd struct {
-	IncidentID           string             `json:"incident_id,omitempty" format:"uuid"`
+	IncidentID           string             `json:"incident_id,omitempty"`
 	Status               string             `json:"status,omitempty"`
 	InsuranceClaimNumber *string            `json:"insurance_claim_number,omitempty"`
 	EstimatedCostCents   *money.AmountCents `json:"estimated_cost_cents,omitempty"`

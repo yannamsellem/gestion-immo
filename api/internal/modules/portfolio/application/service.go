@@ -38,7 +38,7 @@ type LegalEntityDTO struct {
 
 // UpsertShareholderCmd carries the input for creating or updating an associate (CERFA 2059-F).
 type UpsertShareholderCmd struct {
-	LegalEntityID         string            `json:"legal_entity_id,omitempty" format:"uuid"`
+	LegalEntityID         string            `json:"legal_entity_id,omitempty"`
 	FullName              string            `json:"full_name"`
 	SharesCount           int64             `json:"shares_count"`
 	CurrentAccountCents   money.AmountCents `json:"current_account_cents,omitempty"`
@@ -60,7 +60,7 @@ type ShareholderDTO struct {
 
 // CreatePropertyCmd carries the input for adding a property asset to a legal entity.
 type CreatePropertyCmd struct {
-	LegalEntityID      string            `json:"legal_entity_id,omitempty" format:"uuid"`
+	LegalEntityID      string            `json:"legal_entity_id,omitempty"`
 	Label              string            `json:"label"`
 	PropertyType       string            `json:"property_type,omitempty"`
 	AccountingCategory string            `json:"accounting_category,omitempty"`
@@ -87,7 +87,7 @@ type PropertyDTO struct {
 
 // CreateLotCmd carries the input for adding a rentable lot to a property.
 type CreateLotCmd struct {
-	PropertyID     string `json:"property_id,omitempty" format:"uuid"`
+	PropertyID     string `json:"property_id,omitempty"`
 	Label          string `json:"label"`
 	LotType        string `json:"lot_type,omitempty"`
 	SurfaceM2      int64  `json:"surface_m2,omitempty"`

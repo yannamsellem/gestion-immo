@@ -341,3 +341,36 @@ func TestInspection_UUIDv7IdentitiesAndOptionalIncidentScopeValidation(t *testin
 		t.Fatalf("expected 422 for malformed lease_id query on GET /api/v1/incidents, got %d: %s", recBadQuery.Code, recBadQuery.Body.String())
 	}
 }
+
+func TestInspectionHTTP_UpdateIncidentPathSuppliedOptionalBodyIDAcceptsEmptyString(t *testing.T) {
+	templates := memory.NewInspectionTemplateRepo()
+	inspections := memory.NewInspectionRepo()
+	incidents := memory.NewIncidentRepo()
+	uow := memory.NewUnitOfWork(templates, inspections, incidents)
+	svc := application.NewService(templates, inspections, incidents, uow, r2.NewInMemoryStorage(), templating.NewInMemoryPdfEngine())
+	handler := insphttp.NewHandler(svc)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	reqCreate := httptest.NewRequest(http.MethodPost, "/api/v1/incidents", strings.NewReader(`{"title":"Dégât des eaux"}`))
+	reqCreate.Header.Set("Content-Type", "application/json")
+	recCreate := httptest.NewRecorder()
+	mux.ServeHTTP(recCreate, reqCreate)
+	if recCreate.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", recCreate.Code, recCreate.Body.String())
+	}
+	var inc application.IncidentDTO
+	if err := json.Unmarshal(recCreate.Body.Bytes(), &inc); err != nil {
+		t.Fatalf("unmarshal IncidentDTO: %v", err)
+	}
+
+	reqPatch := httptest.NewRequest(http.MethodPatch, "/api/v1/incidents/"+inc.ID, strings.NewReader(`{"incident_id":"","status":"CLOSED"}`))
+	reqPatch.Header.Set("Content-Type", "application/json")
+	recPatch := httptest.NewRecorder()
+	mux.ServeHTTP(recPatch, reqPatch)
+	if recPatch.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK when incident_id is empty string in PATCH body, got %d: %s", recPatch.Code, recPatch.Body.String())
+	}
+}
+

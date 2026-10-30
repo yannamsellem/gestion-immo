@@ -845,7 +845,6 @@
 						"type": "integer"
 					},
 					"property_id": {
-						"format": "uuid",
 						"type": "string"
 					},
 					"surface_m2": {
@@ -882,7 +881,6 @@
 						"type": "string"
 					},
 					"legal_entity_id": {
-						"format": "uuid",
 						"type": "string"
 					},
 					"property_type": {
@@ -2557,7 +2555,6 @@
 						"type": "integer"
 					},
 					"incident_id": {
-						"format": "uuid",
 						"type": "string"
 					},
 					"insurance_claim_number": {
@@ -2609,7 +2606,6 @@
 						"type": "string"
 					},
 					"legal_entity_id": {
-						"format": "uuid",
 						"type": "string"
 					},
 					"remuneration_paid_cents": {
@@ -5107,7 +5103,6 @@
 										"type": "string"
 									},
 									"legal_entity_id": {
-										"format": "uuid",
 										"type": "string"
 									}
 								},

@@ -379,3 +379,51 @@ func TestPortfolio_UUIDv7IdentitiesAndBoundaryValidation(t *testing.T) {
 		t.Fatalf("expected ErrLegalEntityNotFound on non-UUID in GetEntityPortfolioSummary, got %v", err)
 	}
 }
+
+func TestPortfolioHTTP_PathSuppliedOptionalBodyIDsAcceptEmptyString(t *testing.T) {
+	svc := newTestPortfolioService()
+	handler := portfoliohttp.NewHandler(svc)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	reqEnt := httptest.NewRequest(http.MethodPost, "/api/v1/entities", strings.NewReader(`{"name":"SCI PATH OVERRIDE","entity_type":"SCI_IS","total_shares":1000}`))
+	reqEnt.Header.Set("Content-Type", "application/json")
+	recEnt := httptest.NewRecorder()
+	mux.ServeHTTP(recEnt, reqEnt)
+	if recEnt.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", recEnt.Code, recEnt.Body.String())
+	}
+	var ent application.LegalEntityDTO
+	if err := json.Unmarshal(recEnt.Body.Bytes(), &ent); err != nil {
+		t.Fatalf("unmarshal entity: %v", err)
+	}
+
+	reqSh := httptest.NewRequest(http.MethodPost, "/api/v1/entities/"+ent.ID+"/shareholders", strings.NewReader(`{"legal_entity_id":"","full_name":"CLAIRE MARTIN","shares_count":100}`))
+	reqSh.Header.Set("Content-Type", "application/json")
+	recSh := httptest.NewRecorder()
+	mux.ServeHTTP(recSh, reqSh)
+	if recSh.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK when legal_entity_id is empty string in shareholder body, got %d: %s", recSh.Code, recSh.Body.String())
+	}
+
+	reqProp := httptest.NewRequest(http.MethodPost, "/api/v1/entities/"+ent.ID+"/properties", strings.NewReader(`{"legal_entity_id":"","label":"IMMEUBLE PARIS","property_type":"BUILDING","accounting_category":"FIXED_ASSET"}`))
+	reqProp.Header.Set("Content-Type", "application/json")
+	recProp := httptest.NewRecorder()
+	mux.ServeHTTP(recProp, reqProp)
+	if recProp.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created when legal_entity_id is empty string in property body, got %d: %s", recProp.Code, recProp.Body.String())
+	}
+	var prop application.PropertyDTO
+	if err := json.Unmarshal(recProp.Body.Bytes(), &prop); err != nil {
+		t.Fatalf("unmarshal property: %v", err)
+	}
+
+	reqLot := httptest.NewRequest(http.MethodPost, "/api/v1/properties/"+prop.ID+"/lots", strings.NewReader(`{"property_id":"","label":"Lot RDC","lot_type":"APARTMENT"}`))
+	reqLot.Header.Set("Content-Type", "application/json")
+	recLot := httptest.NewRecorder()
+	mux.ServeHTTP(recLot, reqLot)
+	if recLot.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created when property_id is empty string in lot body, got %d: %s", recLot.Code, recLot.Body.String())
+	}
+}
+

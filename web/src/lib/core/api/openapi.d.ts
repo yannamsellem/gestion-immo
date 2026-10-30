@@ -1053,7 +1053,6 @@ export interface components {
 			lot_type?: string;
 			/** Format: int64 */
 			ownership_share?: number;
-			/** Format: uuid */
 			property_id?: string;
 			/** Format: int64 */
 			surface_m2?: number;
@@ -1067,7 +1066,6 @@ export interface components {
 			acquisition_cents?: number;
 			address?: string;
 			label: string;
-			/** Format: uuid */
 			legal_entity_id?: string;
 			property_type?: string;
 			/** Format: int64 */
@@ -1628,7 +1626,6 @@ export interface components {
 			add_photo_r2_keys?: string[];
 			/** Format: int64 */
 			estimated_cost_cents?: number;
-			/** Format: uuid */
 			incident_id?: string;
 			insurance_claim_number?: string;
 			observations?: string[];
@@ -1644,7 +1641,6 @@ export interface components {
 			/** Format: int64 */
 			current_account_cents?: number;
 			full_name: string;
-			/** Format: uuid */
 			legal_entity_id?: string;
 			/** Format: int64 */
 			remuneration_paid_cents?: number;
@@ -3293,7 +3289,6 @@ export interface operations {
 					csv_content: string;
 					/** Format: uuid */
 					entity_id: string;
-					/** Format: uuid */
 					legal_entity_id?: string;
 				};
 				'text/csv': string;
