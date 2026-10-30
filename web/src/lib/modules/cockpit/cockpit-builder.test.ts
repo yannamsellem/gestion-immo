@@ -283,4 +283,108 @@ describe('buildCockpitEntityGroups', () => {
 		expect(groups[0].rows[0].isUpToDate).toBe(true);
 		expect(groups[0].rows[0].actions).toEqual([]);
 	});
+
+	it('counts INSURANCE_CLAIM and WORK_IN_PROGRESS incidents as open while excluding CLOSED and links to /inspections/incidents without tab query params', () => {
+		const groups = buildCockpitEntityGroups({
+			periodMonth: '2026-10',
+			entities: [
+				{
+					id: 'ent_1',
+					name: 'SCI Les Oliviers',
+					entity_type: 'SCI_IS',
+					siret: '12345678900010',
+					naf_code: '6820B',
+					address: '10 rue République, Lyon',
+					share_capital_cents: 100000,
+					total_shares: 100,
+					created_at: '2026-01-01T00:00:00Z',
+					updated_at: '2026-01-01T00:00:00Z'
+				}
+			],
+			propertiesByEntity: {
+				ent_1: [
+					{
+						id: 'prop_1',
+						legal_entity_id: 'ent_1',
+						label: 'Immeuble République',
+						property_type: 'BUILDING',
+						accounting_category: 'FIXED_ASSET',
+						address: '10 rue République, Lyon',
+						acquisition_cents: 25000000,
+						work_stock_cents: 0,
+						total_book_value_cents: 25000000,
+						lots: [
+							{
+								id: 'lot_1',
+								property_id: 'prop_1',
+								label: 'Appt T3 République',
+								lot_type: 'APARTMENT',
+								surface_m2: 65,
+								ownership_share: 500,
+								floor: '2',
+								created_at: '2026-01-01T00:00:00Z',
+								updated_at: '2026-01-01T00:00:00Z'
+							}
+						],
+						created_at: '2026-01-01T00:00:00Z',
+						updated_at: '2026-01-01T00:00:00Z'
+					}
+				]
+			},
+			leases: [],
+			tenants: [],
+			rentCallsByEntity: {},
+			negativePositionsByEntity: {},
+			incidents: [
+				{
+					id: 'inc_claim',
+					property_id: 'prop_1',
+					lot_id: 'lot_1',
+					title: 'Dégât des eaux toiture',
+					status: 'INSURANCE_CLAIM',
+					occurred_at: '2026-10-12',
+					estimated_cost_cents: 120000,
+					observations: [],
+					photo_r2_keys: [],
+					created_at: '2026-10-12T00:00:00Z',
+					updated_at: '2026-10-12T00:00:00Z'
+				},
+				{
+					id: 'inc_wip',
+					property_id: 'prop_1',
+					lot_id: 'lot_1',
+					title: 'Réparation plomberie',
+					status: 'WORK_IN_PROGRESS',
+					occurred_at: '2026-10-14',
+					estimated_cost_cents: 45000,
+					observations: [],
+					photo_r2_keys: [],
+					created_at: '2026-10-14T00:00:00Z',
+					updated_at: '2026-10-14T00:00:00Z'
+				},
+				{
+					id: 'inc_closed',
+					property_id: 'prop_1',
+					lot_id: 'lot_1',
+					title: 'Ampoule hall remplacée',
+					status: 'CLOSED',
+					occurred_at: '2026-10-01',
+					estimated_cost_cents: 2000,
+					observations: [],
+					photo_r2_keys: [],
+					created_at: '2026-10-01T00:00:00Z',
+					updated_at: '2026-10-02T00:00:00Z'
+				}
+			]
+		});
+
+		const row = groups[0].rows[0];
+		expect(row.openIncidentsCount).toBe(2);
+		const incidentAction = row.actions.find((action) => action.kind === 'incident');
+		expect(incidentAction).toBeDefined();
+		expect(incidentAction?.href).toBe(
+			'/inspections/incidents?entityId=ent_1&propertyId=prop_1&incidentId=inc_claim'
+		);
+		expect(incidentAction?.href).not.toContain('tab=');
+	});
 });

@@ -22,9 +22,7 @@ export function buildCockpitEntityGroups(input: CockpitAggregationInput): Entity
 	const activeLeaseByLotId = new Map(
 		input.leases.filter((lease) => lease.active).map((lease) => [lease.lot_id, lease])
 	);
-	const openIncidents = input.incidents.filter(
-		(incident) => incident.status === 'OPEN' || incident.status === 'IN_PROGRESS'
-	);
+	const openIncidents = input.incidents.filter((incident) => incident.status !== 'CLOSED');
 
 	return input.entities.map((entity) => {
 		const properties = input.propertiesByEntity[entity.id] ?? [];
@@ -52,7 +50,7 @@ export function buildCockpitEntityGroups(input: CockpitAggregationInput): Entity
 					actions.push({
 						kind: 'incident',
 						label: `${propIncidents.length} Incident${propIncidents.length > 1 ? 's' : ''} →`,
-						href: `/inspections?entityId=${encodeURIComponent(entity.id)}&propertyId=${encodeURIComponent(property.id)}&incidentId=${encodeURIComponent(propIncidents[0].id)}&tab=incidents`,
+						href: `/inspections/incidents?entityId=${encodeURIComponent(entity.id)}&propertyId=${encodeURIComponent(property.id)}&incidentId=${encodeURIComponent(propIncidents[0].id)}`,
 						variant: 'secondary'
 					});
 				}
@@ -103,7 +101,7 @@ export function buildCockpitEntityGroups(input: CockpitAggregationInput): Entity
 						vacantActions.push({
 							kind: 'incident',
 							label: `${lotIncidents.length} Incident${lotIncidents.length > 1 ? 's' : ''} →`,
-							href: `/inspections?entityId=${encodeURIComponent(entity.id)}&propertyId=${encodeURIComponent(property.id)}&incidentId=${encodeURIComponent(lotIncidents[0].id)}&tab=incidents`,
+							href: `/inspections/incidents?entityId=${encodeURIComponent(entity.id)}&propertyId=${encodeURIComponent(property.id)}&incidentId=${encodeURIComponent(lotIncidents[0].id)}`,
 							variant: 'secondary'
 						});
 					}
@@ -178,7 +176,7 @@ export function buildCockpitEntityGroups(input: CockpitAggregationInput): Entity
 					actions.push({
 						kind: 'incident',
 						label: `${lotIncidents.length} Incident${lotIncidents.length > 1 ? 's' : ''} →`,
-						href: `/inspections?entityId=${encodeURIComponent(entity.id)}&propertyId=${encodeURIComponent(property.id)}&incidentId=${encodeURIComponent(lotIncidents[0].id)}&tab=incidents`,
+						href: `/inspections/incidents?entityId=${encodeURIComponent(entity.id)}&propertyId=${encodeURIComponent(property.id)}&incidentId=${encodeURIComponent(lotIncidents[0].id)}`,
 						variant: 'secondary'
 					});
 				}
